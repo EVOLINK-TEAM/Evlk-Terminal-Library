@@ -457,12 +457,12 @@ namespace _EVLK_TERMINAL_
         if (cmdlock)
         {
             cmdParser(c);
-            return 0;
+            return 1;
         }
         if (c == '\033')
         {
             cmdlock = 1;
-            return 0;
+            return 1;
         }
 
         font f;
@@ -698,10 +698,10 @@ namespace _EVLK_TERMINAL_
                 return charStyle(T_default_fontColor, T_default_backgroundColor);
             }
             if (30 <= data[0] && data[0] <= 37)
-                return color = colorCode(data[0] - 30);
+                return (color = colorCode(data[0] - 30));
 
             if (40 <= data[0] && data[0] <= 47)
-                return bgcolor = colorCode(data[0] - 40);
+                return (bgcolor = colorCode(data[0] - 40));
             return false;
         default:
             break;
