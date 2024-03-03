@@ -12,19 +12,8 @@
 #include "Arduino.h"
 #include "Print.h"
 
-#ifndef TERMINAL_COLORS
-#define TERMINAL_COLORS
-#define T565_BLACK 0X0
-#define T565_RED 0XF800
-#define T565_GREEN 0X400
-#define T565_YELLOW 0XFFE0
-#define T565_BLUE 0X1F
-#define T565_MAGENTA 0XF81F
-#define T565_CYAN 0X7FF
-#define T565_WHITE 0XFFFF
-#define T_default_fontColor T565_WHITE
-#define T_default_backgroundColor T565_BLACK
-#endif
+#include <vector>
+#include "evlk_Terminal_fontImpl.h"
 
 namespace _EVLK_TERMINAL_
 {
@@ -34,9 +23,18 @@ namespace _EVLK_TERMINAL_
         struct font
         {
             char c = '\0';
-            uint16_t color = T_default_fontColor;
-            uint16_t bgcolor = T_default_backgroundColor;
+            _EVLK_TERMINAL_::font *style = NULL;
         };
+
+    private:
+        _EVLK_TERMINAL_::font **styles = NULL;
+        _EVLK_TERMINAL_::font **styles_size = NULL;
+        _EVLK_TERMINAL_::font *pencil = NULL;
+
+        _EVLK_TERMINAL_::fontFactory *styleFactory = NULL;
+        _EVLK_TERMINAL_::font *styleExist(_EVLK_TERMINAL_::font *);
+        bool styleAdd(_EVLK_TERMINAL_::font *);
+        void stylesRelease();
 
     private:
 #define _cmdTempBufferLen 16
@@ -57,8 +55,8 @@ namespace _EVLK_TERMINAL_
 
         uint8_t width; // 窗口宽度
 
-        uint16_t color = T_default_fontColor;         // 字体颜色
-        uint16_t bgcolor = T_default_backgroundColor; // 背景颜色
+        // uint16_t color = T_default_fontColor;         // 字体颜色
+        // uint16_t bgcolor = T_default_backgroundColor; // 背景颜色
 
         char *printLog; // 打印记录
         font *window;   // 打印窗口
@@ -91,7 +89,6 @@ namespace _EVLK_TERMINAL_
         bool endPop(bool force = false);                                            // 结尾前移
         bool cursorPush(bool force = false);                                        // 光标后移
         bool endPush();                                                             // 结尾后移
-        uint16_t colorCode(uint8_t code);                                           // 色码
         void cmdParser(char c);                                                     // 控制符解析
 
     public:
@@ -102,7 +99,7 @@ namespace _EVLK_TERMINAL_
          * @param LogLen 存储的最大字符数
          * @param Log 初始化字符数组，当字符串长度大于LogLen时，以LogLen大小以Log长度为准
          */
-        Terminal(uint8_t width, size_t LogLen, const char *Log = "");
+        Terminal(uint8_t width, fontFactory &factory, size_t Style_Len, size_t Log_Len, const char *Log = "");
         ~Terminal();
 
         /**
@@ -247,14 +244,10 @@ namespace _EVLK_TERMINAL_
         //**************************************************************** 字体控制
 
         /**
-         * @brief 设置字体颜色，输入565颜色
-         * @param color 前景色
-         * @param bgColor 背景色
+         * @brief 设置字体画笔
+         * @param pencil 画笔对象
          */
-        bool charStyle(uint16_t color = T_default_fontColor, uint16_t bgColor = T_default_backgroundColor);
-
-        /** @brief 当前颜色翻转*/
-        bool charColorReverse();
+        bool charStyle(_EVLK_TERMINAL_::font &pencil);
     };
 }
 #endif
