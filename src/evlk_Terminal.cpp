@@ -2,6 +2,41 @@
 
 namespace _EVLK_TERMINAL_
 {
+    _EVLK_TERMINAL_::font *Terminal::styleExist(_EVLK_TERMINAL_::font *p)
+    {
+        _EVLK_TERMINAL_::font **b = this->styles;
+        while (*b && b <= styles_size)
+        {
+            if (*p == **b)
+                return *b;
+            b++;
+        }
+        return NULL;
+    }
+    bool Terminal::styleAdd(_EVLK_TERMINAL_::font *p)
+    {
+        _EVLK_TERMINAL_::font **b = this->styles;
+        while (b < styles_size)
+        {
+            if (!*b)
+            {
+                *b = p;
+                return true;
+            }
+            b++;
+        }
+        return false;
+    }
+    void Terminal::stylesRelease()
+    {
+        _EVLK_TERMINAL_::font **b = this->styles;
+        while (*b && b <= styles_size)
+        {
+            delete *b;
+            b++;
+        }
+    }
+
     bool Terminal::replace(font *p, font f)
     {
         *p = f;
@@ -29,10 +64,7 @@ namespace _EVLK_TERMINAL_
     {
         font f;
         if (p == log)
-        {
-            f.color = color;
-            f.bgcolor = bgcolor;
-        }
+            f.style = pencil;
         else
             f = *p--;
         f.c = c;
@@ -349,40 +381,6 @@ namespace _EVLK_TERMINAL_
         }
         return false;
     }
-    uint16_t Terminal::colorCode(uint8_t code)
-    {
-        uint16_t Color = 0;
-        switch (code)
-        {
-        case 0:
-            Color = T565_BLACK;
-            break;
-        case 1:
-            Color = T565_RED;
-            break;
-        case 2:
-            Color = T565_GREEN;
-            break;
-        case 3:
-            Color = T565_YELLOW;
-            break;
-        case 4:
-            Color = T565_BLUE;
-            break;
-        case 5:
-            Color = T565_MAGENTA;
-            break;
-        case 6:
-            Color = T565_CYAN;
-            break;
-        case 7:
-            Color = T565_WHITE;
-            break;
-        default:
-            break;
-        }
-        return Color;
-    }
     void Terminal::cmdParser(char c)
     {
         auto cancel = [this]()
@@ -467,20 +465,26 @@ namespace _EVLK_TERMINAL_
 
         font f;
         f.c = char(c);
-        f.color = this->color;
-        f.bgcolor = this->bgcolor;
+        f.style = pencil;
         replace(cursor, f);
         cursorPush(true);
         return 1;
     }
-    Terminal::Terminal(uint8_t width, size_t LogLen, const char *Log)
+    Terminal::Terminal(uint8_t width, fontFactory &factory, size_t Style_Len, size_t Log_Len, const char *Log)
     {
         this->width = width;
 
         size_t strLen = strlen(Log);
         strLen++; // 留出空格给光标
 
-        size_t size = LogLen > strLen ? LogLen : strLen;
+        this->styles = new _EVLK_TERMINAL_::font *[Style_Len + 1];
+        memset(this->styles, 0, sizeof(font *) * (Style_Len + 1));
+        this->styles_size = styles + Style_Len;
+        this->styles[0] = factory.createFont();
+        this->pencil = this->styles[0];
+        this->styleFactory = &factory;
+
+        size_t size = Log_Len > strLen ? Log_Len : strLen;
         log = new font[size + 1];
         stand = log;
         this->size = log + size;
@@ -489,6 +493,7 @@ namespace _EVLK_TERMINAL_
         for (size_t i = 0; i < strLen; i++)
         {
             log[i].c = Log[i];
+            log[i].style = this->styles[0];
         }
         end = log + strLen;
         endPush();
@@ -501,6 +506,7 @@ namespace _EVLK_TERMINAL_
     Terminal::~Terminal()
     {
         delete log;
+        stylesRelease();
         if (printLog)
             delete printLog;
         if (window)
@@ -512,11 +518,6 @@ namespace _EVLK_TERMINAL_
     }
     size_t Terminal::Length()
     {
-        // font *i = log;
-        // while (i->c)
-        // {
-        //     i++;
-        // }
         return end - log;
     }
     size_t Terminal::Height(font *stand)
@@ -691,22 +692,60 @@ namespace _EVLK_TERMINAL_
                 return false;
             return focusDown(data[0]);
         case 'm':
-            if (num != 1)
+            if (num < 1)
                 return false;
-            if (data[0] == 0)
-            {
-                return charStyle(T_default_fontColor, T_default_backgroundColor);
-            }
-            if (30 <= data[0] && data[0] <= 37)
-                return (color = colorCode(data[0] - 30));
 
-            if (40 <= data[0] && data[0] <= 47)
-                return (bgcolor = colorCode(data[0] - 40));
-            return false;
+            {
+                _EVLK_TERMINAL_::font *f = this->styleFactory->createFont();
+                *f = *pencil;
+                for (size_t i = 0; i < num; i++)
+                {
+                    if (0 <= data[i] && data[i] <= 8)
+                    {
+                        switch (data[i])
+                        {
+                        case 0:
+                            f->sgr0();
+                            break;
+                        case 1:
+                            f->bold();
+                            break;
+                        case 2:
+                            f->dim();
+                            break;
+                        case 3:
+                            f->smso();
+                            break;
+                        case 4:
+                            f->smul();
+                            break;
+                        case 5:
+                            f->blink();
+                            break;
+                        case 7:
+                            f->rev();
+                            break;
+                        case 8:
+                            f->invis();
+                            break;
+                        default:
+                            break;
+                        }
+                    }
+
+                    if (30 <= data[0] && data[0] <= 37)
+                        f->color_8(data[0] - 30);
+
+                    if (40 <= data[0] && data[0] <= 47)
+                        f->bgColor_8(data[0] - 40);
+                }
+                bool c = charStyle(*f);
+                delete f;
+                return c;
+            }
         default:
             break;
         }
-
         return false;
     }
     const char *Terminal::getLog()
@@ -752,8 +791,7 @@ namespace _EVLK_TERMINAL_
             *(window + i) = *head;
             if (head == cursor && !cursor_Hide)
             {
-                (window + i)->color = head->bgcolor;
-                (window + i)->bgcolor = head->color;
+                // (window + i)->style->rev();
             }
             head++;
             i++;
@@ -1014,8 +1052,7 @@ namespace _EVLK_TERMINAL_
             return true;
         font f;
         f.c = c;
-        f.color = color;
-        f.bgcolor = bgcolor;
+        f.style = pencil;
         num--;
         replace(cursor, f);
         while (num)
@@ -1042,17 +1079,24 @@ namespace _EVLK_TERMINAL_
         return true;
     }
 
-    bool Terminal::charStyle(uint16_t color, uint16_t bgColor)
+    bool Terminal::charStyle(_EVLK_TERMINAL_::font &pencil)
     {
-        this->color = color;
-        this->bgcolor = bgColor;
-        return true;
-    }
-    bool Terminal::charColorReverse()
-    {
-        uint16_t c = color;
-        color = bgcolor;
-        bgcolor = c;
+        if (!&pencil)
+            return false;
+        _EVLK_TERMINAL_::font *p = styleExist(&pencil);
+        if (!p)
+        {
+            p = styleFactory->createFont();
+            if (!p)
+                return false;
+            *p = pencil;
+            if (!styleAdd(p))
+            {
+                delete p;
+                return false;
+            }
+        }
+        this->pencil = p;
         return true;
     }
 }
