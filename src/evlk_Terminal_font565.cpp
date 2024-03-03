@@ -117,7 +117,15 @@ namespace _EVLK_TERMINAL_
     };
     bool font565::operator==(const font565 &f) const
     {
-        return (this->color == f.color && this->bgcolor == f.bgcolor);
+        return (color == f.color &&
+                bgcolor == f.bgcolor &&
+                Bold == f.Bold &&
+                Dim == f.Dim &&
+                Smso == f.Smso &&
+                Smul == f.Smul &&
+                Blink == f.Blink &&
+                Rev == f.Rev &&
+                Invis == f.Invis);
     };
     void font565::operator=(const font &f)
     {
@@ -127,8 +135,15 @@ namespace _EVLK_TERMINAL_
     }
     font565 &font565::operator=(const font565 &f)
     {
-        this->color = f.color;
-        this->bgcolor = f.bgcolor;
+        color = f.color;
+        bgcolor = f.bgcolor;
+        Bold = f.Bold;
+        Dim = f.Dim;
+        Smso = f.Smso;
+        Smul = f.Smul;
+        Blink = f.Blink;
+        Rev = f.Rev;
+        Invis = f.Invis;
         return *this;
     };
 
