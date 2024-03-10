@@ -9,32 +9,55 @@
  * @date 2024.01
  * ***********************************************************/
 
-#include "Arduino.h"
-#include "Print.h"
-
-#include <vector>
+#include <cstddef>
+#include "simpleCntr.h"
 #include "evlk_Terminal_fontImpl.h"
 
 namespace _EVLK_TERMINAL_
 {
-    class Terminal : public Print
+    class Terminal //: public Print
     {
-    public:
-        struct font
+    private:
+        struct fontI // style与log对应的索引器，应包含一个font实例
         {
-            char c = '\0';
-            _EVLK_TERMINAL_::font *style = NULL;
+            size_t size;
+            font *style;
+            bool destory;
+            fontI(bool des = true);
+            ~fontI();
+            fontI &operator=(const fontI &);
         };
 
     private:
-        _EVLK_TERMINAL_::font **styles = NULL;
-        _EVLK_TERMINAL_::font **styles_size = NULL;
-        _EVLK_TERMINAL_::font *pencil = NULL;
+        typedef const fontI *fp;
+        typedef const char *lp;
 
-        _EVLK_TERMINAL_::fontFactory *styleFactory = NULL;
-        _EVLK_TERMINAL_::font *styleExist(_EVLK_TERMINAL_::font *);
-        bool styleAdd(_EVLK_TERMINAL_::font *);
-        void stylesRelease();
+    private:
+        fp style(lp, lp &, fp &); // 样式查找器
+        fp style_q(lp);           // 快速样式查找器
+        fp style_q(lp, lp &h);    // 快速样式查找器
+        void style_q_r();         // 左移快速样式查找器
+        fp style_resize(fp, size_t);
+        fp style_new(fp, size_t, font &); // 应接在styles.insert以后，否则内存不会被释放
+
+        /**
+         * @brief 获取一段节点占用的样式状态
+         * @param b begin
+         * @param n num
+         * @return h 返回头样式的占用情况
+         * @return m 返回中间样式的占用情况
+         * @return e 返回尾样式的占用情况
+         * @return se 返回尾样式指针
+         * @note b+n未超出头结点时：
+         * @note h = n, m = 0, e = 头结点剩余数, se = sh
+         */
+        void style_diff(lp b, size_t n, size_t &h, size_t &m, size_t &e, fp &se);
+
+        fontFactory *const styleFactory;
+        simpleCntr<fontI> styles;
+        font *pencil;
+
+        bool style_check(); //! test
 
     private:
 #define _cmdTempBufferLen 16
@@ -43,63 +66,64 @@ namespace _EVLK_TERMINAL_
                              // 1-头检测('[')
                              // 2-尾检测
 
-        font *log;    // 主记录数组
-        font *size;   // 容量
-        font *end;    // 结尾标识
-        font *focus;  // 焦点视窗
-        font *cursor; // 光标
+        simpleCntr<char> log;
+
+        uint8_t width; // 窗口宽度
+        lp stand;      // 基准位置
+        lp focus;      // 焦点视窗
+        lp cursor;     // 光标
+
         uint8_t cursor_Save_Row = 1;
         uint8_t cursor_Save_Column = 1;
         bool cursor_Hide = false;
-        font *stand; // 基准位置
 
-        uint8_t width; // 窗口宽度
-
-        // uint16_t color = T_default_fontColor;         // 字体颜色
-        // uint16_t bgcolor = T_default_backgroundColor; // 背景颜色
-
-        char *printLog; // 打印记录
-        font *window;   // 打印窗口
+        // 快速搜寻样式，适用于连续查找，相当于存档点不需要从头开始计算
+        //(只能被style_q调用)
+        lp style_serch_lp = NULL;
+        fp style_serch_fp = NULL;
+        // 快速搜寻行头
+        lp line_serch_lp = NULL;
+        size_t line_serch_num = 0;
+        size_t line_serch_col = 0;
 
     private:
         // 以下参数的含义
         // head:一般与p一起出现，指对于p所在行的行头，用于减少运算量，可用getColumn()算出
         // stand:当需要算head时作为基准头
         // force:当函数可能会增加记录个数时，指定是否强制增加
-        bool replace(font *p, font f);
-        bool insert(font *p, font f, bool force = false);                           // 尾插,force指定是否挤出最后一个字符
-        bool insertFollow(font *p, char c, bool force = false);                     // 尾插，但是会跟随前一个字符的样式
-        bool remove(font *p, size_t num = 1);                                       // 删除字符
-        bool remove(font *p, font *e);                                              // 删除字符
-        bool removeFormat(font *p, size_t num, font *head);                         //! 从某行删去几个字符，并填充补偿以保持排版
-        bool clear(font *p, size_t num);                                            // 替换字符成' '
-        bool clearFormat(font *p, size_t num, font *head);                          // 替换字符成' ',保持排版
-        bool clearFormatR(font *p, size_t num, font *head);                         // 向前替换字符成' ',保持排版
-        font *lineDown(font *head);                                                 // 获取下一行的行头,最后一行的下一行为NULL
-        const font *lineDown(const font *head);                                     // 安全获取下一行的行头
-        font *lineUp(font *head, font *stand, size_t num = 1);                      // 获取上一行的行头
-        font *lineEnd(font *head);                                                  // 获取此行的行尾
-        uint8_t getColumn(font *p, font *&head);                                    // 获取节点的纵坐标/找到行头，需要指定head作为初始迭代值
-        uint8_t getRow(font *p, font *head);                                        // 获取节点的横坐标
-        bool getColumn(uint8_t column, size_t &owe, font *&head);                   // 获取节点的纵坐标偏差值，需要指定head作为stand(初始迭代值)
-        bool getRow(uint8_t row, uint8_t &owe, uint8_t &pos, font *head);           // 获取节点的横坐标偏差值
-        font *getPos(uint8_t row, uint8_t column, font *stand, bool force = false); //! 根据横纵坐标获取节点
-        uint8_t rowFillNum(font *head);                                             // 单行需要填充'\n'所需要的空字符数
-        bool cursorPop();                                                           // 光标前移
-        bool endPop(bool force = false);                                            // 结尾前移
-        bool cursorPush(bool force = false);                                        // 光标后移
-        bool endPush();                                                             // 结尾后移
-        void cmdParser(char c);                                                     // 控制符解析
+        bool isIn(lp p);
+        bool isIn(lp p, lp h);
+        lp insert(lp p, size_t n, font &s, char f);   // 前插,分配空间
+        lp insert_s(lp p, size_t n, font &s, char f); // 保持光标、焦点等位置不变
+        lp remove(lp p, size_t n);                    // 删除字符
+        lp remove_s(lp p, size_t n);                  // 保持光标、焦点等位置不变
+        lp remove_f(lp p, size_t n, lp head);         //! 从某行删去几个字符，并填充补偿以保持排版
+        lp replace(lp p, size_t n, font &s, char f);
+
+        bool clear(lp p, size_t num);                                         // 替换字符成' '
+        bool clear_f(lp p, size_t num, lp head);                              // 替换字符成' ',保持排版
+        bool clear_fR(lp p, size_t num, lp head);                             // 向前替换字符成' ',保持排版
+        lp lineDown(lp head);                                                 // 获取下一行的行头,最后一行的下一行为NULL
+        lp lineUp(lp head, lp stand, size_t num = 1);                         // 获取上一行的行头
+        lp lineEnd(lp head);                                                  // 获取此行的行尾
+        uint8_t getColumn(lp p, lp &head);                                    // 获取节点的纵坐标/找到行头，需要指定head作为初始迭代值
+        uint8_t getRow(lp p, lp head);                                        // 获取节点的横坐标,从1开始
+        bool getColumn(uint8_t column, size_t &owe, lp &head);                // 获取节点的纵坐标偏差值，需要指定head作为stand(初始迭代值)
+        bool getRow(uint8_t row, uint8_t &owe, uint8_t &pos, lp head);        // 获取节点的横坐标偏差值
+        lp getPos(uint8_t row, uint8_t column, lp stand, bool force = false); //! 根据横纵坐标获取节点
+        uint8_t rowFillNum(lp head);                                          // 单行需要填充'\n'所需要的空字符数
+        void cmdParser(char c);                                               // 控制符解析
 
     public:
-        using Print::write;
-        size_t write(uint8_t) override;
+        size_t write(uint8_t);
+        size_t write(const uint8_t *buffer, size_t size);
+
         /**
          * @param width 指定窗口宽度
          * @param LogLen 存储的最大字符数
          * @param Log 初始化字符数组，当字符串长度大于LogLen时，以LogLen大小以Log长度为准
          */
-        Terminal(uint8_t width, fontFactory &factory, size_t Style_Len, size_t Log_Len, const char *Log = "");
+        Terminal(uint8_t width, size_t Log_Len, fontFactory &factory, size_t Style_Len);
         ~Terminal();
 
         /**
@@ -116,7 +140,7 @@ namespace _EVLK_TERMINAL_
          * @brief 返回当前的最大行数
          * @param stand 指定开始的节点指针，如果为NULL则从头节点开始
          */
-        size_t Height(font *stand = NULL);
+        size_t Height(lp stand = NULL);
 
         /**
          * @brief 重新设定宽度
@@ -129,24 +153,6 @@ namespace _EVLK_TERMINAL_
          * @param 控制码，以"\033["开头
          */
         bool cmdParser(const char *str);
-
-        /**
-         * @brief 以字符串的形式返回存储记录
-         */
-        const char *getLog();
-
-        //! ****************** look this
-        /**
-         * @brief 获取一行的存储记录，可用于打印终端内容
-         * @param head 存储记录的某个行头节点
-         * @return 以复制的形式返回该行的行头指针
-         * @note 1.返回的数组宽度应当严格等于当前行宽度,若内容不足行宽,则剩余部分用'\0'填充。 \n
-         * @note 2.因未开放存储记录的数组及其指针，所以无法以常规方式获取行头节点。当head设置为NULL时，则head被解析为focus节点(页面左上角)。
-         * @note \n 当每调用一次getWindow()后，head的值自动移到下一行的行头节点。
-         * @note \n 当head已为最后一行时，再次调用getWindow()后head被置于尾节点(不显示)，此后head不会自动移动，并返回NULL。
-         * @note \n 详细用法请见用例。
-         */
-        const font *getWindow(const font *&head);
 
         //**************************************************************** 光标控制
 
@@ -228,19 +234,6 @@ namespace _EVLK_TERMINAL_
          */
         bool Insert(char c, uint8_t num, bool force = false);
 
-        /**
-         * @brief 页面向上滚动
-         * @param num 滚动的行数
-         * @attention 单行时间复杂度较高，不宜频繁使用
-         */
-        bool focusUp(uint8_t num = 1);
-
-        /**
-         * @brief 页面向下滚动
-         * @param num 滚动的行数
-         */
-        bool focusDown(uint8_t num = 1);
-
         //**************************************************************** 字体控制
 
         /**
@@ -248,6 +241,53 @@ namespace _EVLK_TERMINAL_
          * @param pencil 画笔对象
          */
         bool charStyle(_EVLK_TERMINAL_::font &pencil);
+
+        //************************************************************** 打印接口
+        /**
+         * @brief 焦点上行
+         * @param num 滚动的行数
+         * @attention 单行时间复杂度较高，不宜频繁使用
+         */
+        bool focusUp(uint8_t num = 1);
+        /**
+         * @brief 焦点下行
+         * @param num 滚动的行数
+         */
+        bool focusDown(uint8_t num = 1);
+
+        /**
+         * @brief 获取焦点指针
+         */
+        lp getFocus();
+        /**
+         * @brief 获取光标指针
+         * @note 如果为NULL，则隐藏了光标，可以使用```cursorHide(false);```恢复
+         */
+        lp getCursor();
+        /**
+         * @brief 获取头指针
+         */
+        lp getBegin();
+        /**
+         * @brief 获取尾指针
+         * @note 尾指针始终为空，访问最后以一个元素应该使用```getEnd()-1```
+         */
+        lp getEnd();
+
+        /**
+         * @brief 获取上行
+         */
+        lp UP(lp h, size_t n = 1);
+
+        /**
+         * @brief 获取下行
+         */
+        lp DOWN(lp h, size_t n = 1);
+
+        /**
+         * @brief 获取样式
+         */
+        const font *style(lp p);
     };
 }
 #endif

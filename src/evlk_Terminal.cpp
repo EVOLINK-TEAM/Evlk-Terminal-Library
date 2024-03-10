@@ -1,200 +1,385 @@
 #include "evlk_Terminal.h"
+#include <cctype>
+#include <cstring>
+#include <stdlib.h>
 
 namespace _EVLK_TERMINAL_
 {
-    _EVLK_TERMINAL_::font *Terminal::styleExist(_EVLK_TERMINAL_::font *p)
+    Terminal::fontI::fontI(bool des) : destory(des)
     {
-        _EVLK_TERMINAL_::font **b = this->styles;
-        while (*b && b <= styles_size)
+        size = 0;
+        style = NULL;
+    };
+    Terminal::fontI::~fontI()
+    {
+        if (style && destory)
+            delete style;
+    }
+    Terminal::fontI &Terminal::fontI::operator=(const fontI &f)
+    {
+        this->size = f.size;
+        this->style = f.style;
+        return *this;
+    }
+    Terminal::fp Terminal::style(lp p, lp &h, fp &hs)
+    {
+        if (!log.isIn(h, p) || !styles.isIn(hs))
+            return NULL;
+
+        size_t n = p - log.begin() + 1;
+        size_t l = h - log.begin();
+
+        while (hs < styles.end())
         {
-            if (*p == **b)
-                return *b;
-            b++;
+            size_t L = l + hs->size;
+            if (L >= n)
+            {
+                h = log.begin() + l;
+                return hs;
+            }
+            l = L;
+            hs++;
         }
         return NULL;
     }
-    bool Terminal::styleAdd(_EVLK_TERMINAL_::font *p)
+    Terminal::fp Terminal::style_q(lp p)
     {
-        _EVLK_TERMINAL_::font **b = this->styles;
-        while (b < styles_size)
+        if (!log.isIn(style_serch_lp, p))
         {
-            if (!*b)
+            style_serch_lp = log.begin();
+            style_serch_fp = styles.begin();
+        }
+        return style(p, style_serch_lp, style_serch_fp);
+    }
+    Terminal::fp Terminal::style_q(lp p, lp &h)
+    {
+        fp S = style_q(p);
+        if (S)
+            h = style_serch_lp;
+        return S;
+    }
+    void Terminal::style_q_r()
+    {
+        if (style_serch_fp > styles.begin())
+        {
+            style_serch_fp--;
+            style_serch_lp -= style_serch_fp->size;
+        }
+    }
+    Terminal::fp Terminal::style_resize(fp p, size_t num)
+    {
+        fontI temp(false);
+        temp.style = p->style;
+        temp.size = num;
+        return styles.replace(p, 1, temp);
+    }
+    Terminal::fp Terminal::style_new(fp p, size_t size, font &f)
+    {
+        fontI temp(false);
+        if (&f)
+            temp.style = styleFactory->createFont();
+        *temp.style = f;
+        temp.size = size;
+        return styles.replace(p, 1, temp, true);
+    }
+    void Terminal::style_diff(lp b, size_t n, size_t &h, size_t &m, size_t &e, fp &se)
+    {
+        h = m = e = 0;
+        se = NULL;
+        if (!log.isIn(b, b + n))
+            return;
+
+        lp fh = NULL;
+        fp sh = style_q(b, fh);
+
+        if (b + n <= fh + sh->size)
+        {
+            h = n;
+            e = (fh + sh->size) - (b + n);
+            se = sh;
+            return;
+        }
+        h = sh->size - (b - fh);
+        n -= h;
+        for (fp i = sh + 1; i < styles.end(); i++)
+        {
+            if (n <= i->size)
             {
-                *b = p;
-                return true;
+                e = n;
+                se = i;
+                return;
             }
-            b++;
-        }
-        return false;
-    }
-    void Terminal::stylesRelease()
-    {
-        _EVLK_TERMINAL_::font **b = this->styles;
-        while (*b && b <= styles_size)
-        {
-            delete *b;
-            b++;
+            n -= i->size;
+            m += i->size;
         }
     }
 
-    bool Terminal::replace(font *p, font f)
+    bool Terminal::style_check()
     {
-        *p = f;
-        return true;
-    }
-    bool Terminal::insert(font *p, font f, bool force)
-    {
-        font *last = end - 1; // 需要向后移动一位
-        if (!endPush())
+        fp fb = styles.begin();
+        fp const fe = styles.end();
+        size_t l = 0;
+        while (fb < fe)
         {
-            if (!force)
-                return false;
+            if (!fb->style)
+                return 0;
+            if (fb + 1 != fe && *fb->style == *(fb + 1)->style)
+                return 0;
+            l += fb->size;
+            fb++;
+        }
+        if (fe->size != 0 || fe->style)
+            return 0;
+        if (l != log.length())
+            return 0;
+        return 1;
+    }
 
-            last--;
-        }
-        while (last >= p)
-        {
-            *(last + 1) = *last;
-            last--;
-        }
-        replace(p + 1, f);
-        return true;
-    }
-    bool Terminal::insertFollow(font *p, char c, bool force)
+    bool Terminal::isIn(lp p)
     {
-        font f;
-        if (p == log)
-            f.style = pencil;
+        return log.isIn(p);
+    }
+    bool Terminal::isIn(lp p, lp h)
+    {
+        return isIn(h, p) || p - h < width;
+    }
+    Terminal::lp Terminal::insert(lp p, size_t n, font &s, char f) //!
+    {
+        bool isEnd = (p == log.end()); // 插入干扰
+        lp r = log.insert(p, n, f);
+        if (!r)
+            return NULL;
+
+        if (styles.empty()) // 初始化样式表
+        {
+            fp b = styles.insert(styles.end(), 1); // 构造函数预留了至少一个
+            style_new(b, n, s);
+            return r;
+        }
+
+        lp h = NULL;
+        fp S = isEnd ? styles.end() - 1 : style_q(p, h);
+        if (!S)
+            return NULL;
+
+        auto style_insertError = [r, n, S, this]() -> lp
+        {
+            style_resize(S, S->size + n);
+            return r;
+        };
+
+        if (*S->style == s) // 样式相同时
+        {
+            style_resize(S, S->size + n);
+        }
         else
-            f = *p--;
-        f.c = c;
-
-        return insert(p, f, force);
-    }
-    bool Terminal::remove(font *p, size_t num)
-    {
-        num = num > 1 ? num : 1;
-        if (p + num - 1 >= end)
-            return false;
-        if (p < cursor)
-            cursor -= num;
-
-        for (font *i = p; i < end - num; ++i)
         {
-            *i = *(i + num);
+            if (isEnd)
+            {
+                fp temp = styles.insert(styles.end(), 1);
+                if (!temp)
+                    return style_insertError();
+                style_new(temp, n, s);
+            }
+            else
+            {
+                if (p == h) // 头
+                {
+                    if (!(p == log.begin()) && *(S - 1)->style == s) // 样式与上一个样式相同
+                    {
+                        style_q_r();
+                        style_resize(S - 1, n + (S - 1)->size);
+                    }
+                    else
+                    {
+                        fp temp = styles.insert(S, 1);
+                        if (!temp)
+                            return style_insertError();
+                        style_new(temp, n, s);
+                    }
+                }
+                else // 中
+                {
+                    fp temp = styles.insert(S + 1, 2);
+                    if (!temp)
+                        return style_insertError();
+                    size_t S_size = S->size;
+
+                    style_resize(S, p - h);
+                    style_new(temp, n, s);
+                    style_new(++temp, S_size - (p - h), *(S->style));
+                }
+            }
         }
-        while (num)
+        return r;
+    }
+    Terminal::lp Terminal::insert_s(lp p, size_t n, font &s, char f)
+    {
+        lp S = insert(p, n, s, f);
+        if (S)
         {
-            if (!endPop(true))
-                return false;
-            num--;
+            stand = p < stand ? stand - n : stand;
+            cursor = p < cursor ? cursor - n : cursor;
+            focus = p < focus ? focus - n : focus;
         }
-
-        return true;
+        return S;
     }
-    bool Terminal::remove(font *p, font *e)
+    Terminal::lp Terminal::remove(lp p, size_t n)
     {
-        if (e <= p)
-            return false;
-        size_t num = e - p;
-        return remove(p, num);
-    }
-    bool Terminal::removeFormat(font *p, size_t num, font *head)
-    {
-        if (num < 1)
-            return false;
+        lp fh = NULL;
+        fp sh = style_q(p, fh);
+        if (!sh)
+            return NULL;
 
+        size_t dh, dm, de;
+        fp se;
+        style_diff(p, n, dh, dm, de, se);
+        bool headOver = !(se == sh);             // 是否超过头
+        size_t headRemain = !headOver ? de : 0;  // 未超过头时的剩余
+        bool hasHead = !(p == fh);               // 是否在头的最前
+        bool hasEnd = headOver && de < se->size; // 是否在尾的最后
+
+        char f = '\0';
+        lp r = log.remove(p, n, f);
+        if (!r)
+            return NULL;
+
+        style_resize(sh, sh->size - dh);
+        if (headRemain)
+            return r;
+        else
+            style_resize(se, se->size - de);
+
+        bool B = !hasHead && sh > styles.begin();
+        bool E = !hasEnd && sh < styles.end() - 1;
+        fp pB = B ? sh - 1 : sh;
+        fp pE = E ? se + 1 : se;
+
+        if (B)
+            style_q_r();
+
+        if (pB != pE && *pB->style == *pE->style)
+        {
+            style_resize(pB, pB->size + pE->size);
+            pE++;
+        }
+        if (!styles.remove(pB + 1, pE - 1 - pB, true))
+            return NULL;
+        return r;
+    }
+    Terminal::lp Terminal::remove_s(lp p, size_t n)
+    {
+        lp S = remove(p, n);
+        if (S)
+        {
+            stand = p < stand ? stand - n : stand;
+            cursor = p < cursor ? cursor - n : cursor;
+            focus = p < focus ? focus - n : focus;
+        }
+        return S;
+    }
+    Terminal::lp Terminal::remove_f(lp p, size_t n, lp head)
+    {
         uint8_t row = getRow(p, head);
-        font *e = lineEnd(head);
-        uint8_t fillpos = width - rowFillNum(head);
-        if (e == head && e->c == '\n') //'\n'在行首
-            return true;
+        if (!row)
+            return NULL;
 
-        num = row + num - 1 > width ? width - row + 1 : num;
-        if (p + num > head + fillpos)
+        lp e = lineEnd(head);
+        uint8_t fillpos = width - rowFillNum(head);
+
+        if (e == head && *e == '\n') //'\n'在行首
+            return p;
+
+        n = row + n - 1 > width ? width - row + 1 : n;
+        if (p + n > head + fillpos)
         {
-            num = head + fillpos - p + 1;
-            if (e->c == '\n')
-                num--;
+            n = head + fillpos - p + 1;
+            if (*e == '\n')
+                n--;
         }
 
-        if (e == end - 1 && e->c != '\n') // 尾行
-            num--;
+        if (e == log.end() - 1 && *e != '\n') // 尾行
+            n--;
 
-        fillpos = fillpos - num + 1;
+        fillpos = fillpos - n + 1;
 
-        char t = e->c;
-        if (!remove(p, num))
+        lp S = remove_s(p, n);
+        if (!S)
+            return NULL;
+
+        fp s = style_q(S);
+        if (!s)
+            return NULL;
+
+        if (*e != '\n')
+            if (!insert_s(head + fillpos - 1, 1, *s->style, ' '))
+                return NULL;
+        return p;
+    }
+    Terminal::lp Terminal::replace(lp p, size_t n, font &s, char f)
+    {
+        lp r = remove(p, n);
+        if (r)
+            r = insert(r, n, s, f);
+        return r;
+    }
+    bool Terminal::clear(lp p, size_t num)
+    {
+        char f = ' ';
+        return (bool)log.replace(p, num, f, false);
+    }
+    bool Terminal::clear_f(lp p, size_t num, lp head)
+    {
+        if (!isIn(p, head))
             return false;
 
-        if (t != '\n')
-            if (!insertFollow(head + fillpos - 1, '\n', false))
-                return false;
-
-        return true;
-    }
-    bool Terminal::clear(font *p, size_t num)
-    {
-        while (num)
-        {
-            font f = *(p + num - 1);
-            f.c = ' ';
-            replace((p + num - 1), f);
-            num--;
-        }
-        return true;
-    }
-    bool Terminal::clearFormat(font *p, size_t num, font *head)
-    {
-        font *e = lineEnd(head);
+        lp e = lineEnd(head);
         if (num >= e - p + 1)
         {
             num = e - p + 1;
-            if (e->c == '\n')
+            if (*e == '\n')
                 num--;
         }
         return clear(p, num);
     }
-    bool Terminal::clearFormatR(font *p, size_t num, font *head)
+    bool Terminal::clear_fR(lp p, size_t num, lp head)
     {
+        if (!isIn(p, head))
+            return false;
+
         if (num >= p - head + 1)
         {
             num = p - head + 1;
-            if (p->c == '\n')
+            if (*p == '\n')
                 num--;
         }
         return clear(p - num + 1, num);
     }
-    Terminal::font *Terminal::lineDown(font *head)
+    Terminal::lp Terminal::lineDown(lp head)
     {
-        if (!head)
+        if (!isIn(head))
             return NULL;
 
-        for (font *t = head; t < head + width; t++)
+        for (lp t = head; t < head + width; t++)
         {
-            if (t->c == '\n')
+            if (*t == '\n')
             {
-                if (t + 1 >= end)
+                if (t + 1 >= log.end())
                     return NULL;
                 return t + 1;
             }
         }
-        if (head + width >= end)
+        if (head + width >= log.end())
             return NULL;
         return head + width;
     }
-    const Terminal::font *Terminal::lineDown(const font *head)
+    Terminal::lp Terminal::lineUp(lp head, lp stand, size_t num)
     {
-        font *Head = const_cast<font *>(head);
-        return lineDown(Head);
-    }
-    Terminal::font *Terminal::lineUp(font *head, font *stand, size_t num)
-    {
-        if (head < stand)
+        if (!isIn(head) || !isIn(stand) || head < stand)
             return NULL;
 
-        font *first = stand;
-        font *idx = first;
+        lp first = stand;
+        lp idx = first;
         while (first < head)
         {
             first = lineDown(first);
@@ -205,20 +390,23 @@ namespace _EVLK_TERMINAL_
         }
         return idx;
     }
-    Terminal::font *Terminal::lineEnd(font *head)
+    Terminal::lp Terminal::lineEnd(lp head)
     {
+        if (!isIn(head))
+            return NULL;
+
         head = lineDown(head);
         if (!head)
-            return end - 1;
+            return log.end() - 1;
         return head - 1;
     }
-    uint8_t Terminal::getColumn(font *p, font *&head)
+    uint8_t Terminal::getColumn(lp p, lp &head)
     {
-        if (head > p)
+        if (!isIn(p, head))
             return 0;
 
-        font *pre = NULL;
-        font *idx = head;
+        lp pre = NULL;
+        lp idx = head;
         uint8_t column = 0;
 
         while (idx && idx <= p)
@@ -230,19 +418,18 @@ namespace _EVLK_TERMINAL_
         head = pre;
         return column;
     }
-    uint8_t Terminal::getRow(font *p, font *head)
+    uint8_t Terminal::getRow(lp p, lp head)
     {
-        if (head > p)
+        if (!isIn(p, head))
             return 0;
-
-        return p - head + 1 <= width && p - head + 1 > 0 ? p - head + 1 : 0;
+        return p - head + 1;
     }
-    bool Terminal::getColumn(uint8_t column, size_t &owe, font *&head)
+    bool Terminal::getColumn(uint8_t column, size_t &owe, lp &head)
     {
-        if (column <= 0)
+        if (column <= 0 || !isIn(head))
             return false;
         owe = 0; // 只有在column>最低行的时候才会为正值
-        font *next = head;
+        lp next = head;
         while (column-- > 1)
         {
             next = lineDown(head);
@@ -254,18 +441,18 @@ namespace _EVLK_TERMINAL_
         }
         return true;
     }
-    bool Terminal::getRow(uint8_t row, uint8_t &owe, uint8_t &pos, font *head)
+    bool Terminal::getRow(uint8_t row, uint8_t &owe, uint8_t &pos, lp head)
     {
-        if (row <= 0 || row > width)
+        if (row <= 0 || row > width || !isIn(head))
             return false;
         pos = head ? width - rowFillNum(head) : 0; // 行填充位置(如果head为NULL的话则为假行，假行为'\n'单字符行)
         owe = pos < row ? row - pos : 0;           // 行填充数
 
         return true;
     }
-    Terminal::font *Terminal::getPos(uint8_t row, uint8_t column, font *stand, bool force)
+    Terminal::lp Terminal::getPos(uint8_t row, uint8_t column, lp stand, bool force)
     {
-        font *head = stand;
+        lp head = stand;
         size_t fillLine;
         uint8_t fillRow;
         uint8_t fillRowPos;
@@ -295,98 +482,47 @@ namespace _EVLK_TERMINAL_
 
         if (force)
         {
-            if (end + fillLine + fillRow >= size) // 溢出判断
+            if (log.end() + fillLine + fillRow >= log.size()) // 溢出判断
                 return NULL;
 
-            font f = *(head + fillRowPos);
+            fp r = style_q(head + fillRow);
+            if (!r)
+                return NULL;
+
+            font *fe = (r->style);
+
+            if (!insert(log.end() - 1, fillLine, *fe, '\n'))
+                return NULL;
             while (fillLine)
             {
-                f.c = '\n';
-                insert(end - 1, f, false);
-                head = end - 1;
+                head = log.end() - 1;
                 fillLine--;
             }
 
-            while (fillRow)
-            {
-                f.c = ' ';
-                insert(head + fillRowPos - 1, f, false);
-                fillRow--;
-            }
+            if (!insert(head + fillRowPos - 1, fillRow, *fe, ' '))
+                return NULL;
 
             return head + row - 1;
         }
         return NULL;
     }
-    uint8_t Terminal::rowFillNum(font *head)
+    uint8_t Terminal::rowFillNum(lp head)
     {
-        for (uint8_t i = 0; i < width; i++)
-        {
-            if ((head + i)->c == '\n')
-                return width - i;
-        }
+        lp e = lineEnd(head);
+        if (!e)
+            return 0;
 
-        if (head + width >= end)
-        {
-            return width - (end - head);
-        }
-        return 0;
-    }
-    bool Terminal::cursorPop()
-    {
-        if (cursor <= log)
-            return false;
-        cursor--;
-        return true;
-    }
-    bool Terminal::endPop(bool force)
-    {
-        if (end <= cursor && (!force || !cursorPop()))
-            return false;
-        font f;
-        end--;
-        *end = f;
-        return true;
-    }
-    bool Terminal::cursorPush(bool force)
-    {
-        if (cursor < end - 1)
-        {
-            cursor++;
-            return true;
-        }
-
-        if (force && endPush())
-        {
-            cursor++;
-            return true;
-        }
-
-        return false;
-    }
-    bool Terminal::endPush()
-    {
-        if (end < size)
-        {
-            font f;
-            if (end->c == '\0')
-            {
-                f.c = ' ';
-                *end = f;
-            }
-            end++;
-            f.c = '\0';
-            *end = f;
-            return true;
-        }
-        return false;
+        uint8_t f = width - (e - head + 1);
+        if (*e == '\n')
+            f++;
+        return f;
     }
     void Terminal::cmdParser(char c)
     {
         auto cancel = [this]()
         {
             cmdlock = 0;
-            write(cmdtemp);
+            write((uint8_t *)cmdtemp, strlen(cmdtemp));
             strcpy(cmdtemp, "");
         };
 
@@ -452,65 +588,69 @@ namespace _EVLK_TERMINAL_
 
     size_t Terminal::write(uint8_t c)
     {
-        if (cmdlock)
-        {
-            cmdParser(c);
-            return 1;
-        }
-        if (c == '\033')
-        {
-            cmdlock = 1;
-            return 1;
-        }
-
-        font f;
-        f.c = char(c);
-        f.style = pencil;
-        replace(cursor, f);
-        cursorPush(true);
-        return 1;
+        return write(&c, 1);
     }
-    Terminal::Terminal(uint8_t width, fontFactory &factory, size_t Style_Len, size_t Log_Len, const char *Log)
+    size_t Terminal::write(const uint8_t *buffer, size_t size)
     {
-        this->width = width;
-
-        size_t strLen = strlen(Log);
-        strLen++; // 留出空格给光标
-
-        this->styles = new _EVLK_TERMINAL_::font *[Style_Len + 1];
-        memset(this->styles, 0, sizeof(font *) * (Style_Len + 1));
-        this->styles_size = styles + Style_Len;
-        this->styles[0] = factory.createFont();
-        this->pencil = this->styles[0];
-        this->styleFactory = &factory;
-
-        size_t size = Log_Len > strLen ? Log_Len : strLen;
-        log = new font[size + 1];
-        stand = log;
-        this->size = log + size;
-
-        strLen--;
-        for (size_t i = 0; i < strLen; i++)
+        auto Write = [this](const uint8_t *buffer, size_t size) -> size_t
         {
-            log[i].c = Log[i];
-            log[i].style = this->styles[0];
-        }
-        end = log + strLen;
-        endPush();
+            if (!size)
+                return true;
+            const char *Buffer = (const char *)buffer;
+            bool S = false;
+            size_t rs = log.end() - cursor;
 
-        focus = log;
-        cursor = end - 1;
-        printLog = NULL;
-        window = NULL;
+            S = insert_s(log.end(), size - rs + 1, *pencil, ' ');
+            if (S)
+                S = replace(cursor, rs, *pencil, ' ');
+            if (S)
+            {
+                for (size_t i = 0; i < size; i++)
+                    log.replace(cursor + i, 1, *(Buffer + i));
+                cursor += size;
+            }
+            return S ? size : 0;
+        };
+
+        const uint8_t *b = buffer;
+        size_t n = 0;
+        size_t N = 0;
+        for (size_t i = 0; i < size; i++)
+        {
+            char c = *(buffer + i);
+            if (cmdlock)
+            {
+                cmdParser(c);
+                b++;
+                continue;
+            }
+            if (c == '\033')
+            {
+                N += Write(b, n);
+                b += n + 1;
+                n = 0;
+                cmdlock = 1;
+                continue;
+            }
+            n++;
+        }
+        N += Write(b, n);
+        return N;
+    }
+    Terminal::Terminal(uint8_t width, size_t Log_Len, fontFactory &factory, size_t Style_Len)
+        : log(Log_Len > 1 ? Log_Len : 1, '\0'),
+          styles(Style_Len > 1 ? Style_Len : 1),
+          width(width),
+          styleFactory(&factory)
+    {
+        stand = focus = cursor = log.begin();
+        pencil = styleFactory->createFont(); // 初始化样式画笔
+        pencil->init();
+        insert(log.begin(), 1, *pencil, ' ');
     };
     Terminal::~Terminal()
     {
-        delete log;
-        stylesRelease();
-        if (printLog)
-            delete printLog;
-        if (window)
-            delete window;
+        delete pencil;
     }
     uint8_t Terminal::Width()
     {
@@ -518,18 +658,17 @@ namespace _EVLK_TERMINAL_
     }
     size_t Terminal::Length()
     {
-        return end - log;
+        return log.length();
     }
-    size_t Terminal::Height(font *stand)
+    size_t Terminal::Height(lp stand)
     {
         size_t h = 1;
-        stand = stand == NULL ? log : stand;
+        stand = stand == NULL ? log.begin() : stand;
         while (stand)
         {
-            stand = lineDown(stand);
+            stand = DOWN(stand);
             h++;
         }
-
         return h;
     }
     bool Terminal::resize(uint8_t width)
@@ -537,7 +676,7 @@ namespace _EVLK_TERMINAL_
         this->width = width;
         return true;
     }
-    bool Terminal::cmdParser(const char *str)
+    bool Terminal::cmdParser(lp str)
     {
         if (str[0] != '\033' || str[1] != '[')
             return false;
@@ -748,76 +887,20 @@ namespace _EVLK_TERMINAL_
         }
         return false;
     }
-    const char *Terminal::getLog()
+
+    bool Terminal::cursorPos(uint8_t row, uint8_t column, bool force) //!
     {
-        if (printLog)
-        {
-            delete printLog;
-            printLog = NULL;
-        }
-        size_t l = Length();
-        printLog = new char[l + 1];
-        printLog[l] = '\0';
-        for (size_t i = 0; i < l; i++)
-        {
-            printLog[i] = log[i].c;
-        }
-        return printLog;
-    }
-    const Terminal::font *Terminal::getWindow(const font *&head)
-    {
-        if (window)
-        {
-            delete window;
-            window = NULL;
-        }
-
-        if (head == NULL)
-            head = focus;
-
-        if (head == end)
-            return NULL;
-        const font *next = lineDown(head);
-        if (!next)
-            next = end;
-
-        window = new font[width];
-        uint8_t i = 0;
-        while (head < next)
-        {
-            if (head->c == '\0')
-                head->c == '?'; //! debug
-
-            *(window + i) = *head;
-            if (head == cursor && !cursor_Hide)
-            {
-                // (window + i)->style->rev();
-            }
-            head++;
-            i++;
-        }
-        while (i < width)
-        {
-            (window + i)->c = '\0'; //!
-            i++;
-        }
-
-        return window;
-    }
-
-    bool Terminal::cursorPos(uint8_t row, uint8_t column, bool force)
-    {
-        font *t = getPos(row, column, log, force);
+        lp t = getPos(row, column, log.begin(), force);
         if (!t)
             return false;
         cursor = t;
-        if (end <= cursor)
-            end = cursor + 1;
+        //! if (end <= cursor)
+        //     end = cursor + 1;
         return true;
     }
     bool Terminal::cursorDirect(uint8_t direct, uint8_t num, bool force)
     {
-        font *head = stand;
+        lp head = stand;
         uint8_t column = getColumn(cursor, head);
         uint8_t row = getRow(cursor, head);
         if (!column || !row)
@@ -852,7 +935,7 @@ namespace _EVLK_TERMINAL_
     }
     bool Terminal::cursorDirectHead(uint8_t direct, uint8_t num, bool force)
     {
-        font *head = stand;
+        lp head = stand;
         uint8_t column = getColumn(cursor, head);
         if (!column)
             return false;
@@ -878,13 +961,13 @@ namespace _EVLK_TERMINAL_
     }
     bool Terminal::cursorRow(uint8_t row, bool force)
     {
-        font *head = stand;
+        lp head = stand;
         uint8_t column = getColumn(cursor, head);
         return cursorPos(row, column, force);
     }
     bool Terminal::cursorGet(uint8_t &row, uint8_t &column)
     {
-        font *head = stand;
+        lp head = stand;
         column = getColumn(cursor, head);
         row = getRow(cursor, head);
         if (!column || !row)
@@ -893,7 +976,7 @@ namespace _EVLK_TERMINAL_
     }
     bool Terminal::cursorSave()
     {
-        font *head = log;
+        lp head = log.begin();
         uint8_t column = getColumn(cursor, head);
         uint8_t row = getRow(cursor, head);
         if (!column || !row)
@@ -905,8 +988,8 @@ namespace _EVLK_TERMINAL_
     }
     bool Terminal::cursorUse()
     {
-        font *head = log;
-        font *pos = getPos(cursor_Save_Row, cursor_Save_Column, head, true);
+        lp head = log.begin();
+        lp pos = getPos(cursor_Save_Row, cursor_Save_Column, head, true);
         if (!pos)
             return false;
         cursor = pos;
@@ -920,7 +1003,7 @@ namespace _EVLK_TERMINAL_
 
     bool Terminal::clearDirect(uint8_t direct, uint8_t num)
     {
-        font *head = log;
+        lp head = log.begin();
         uint8_t column = getColumn(cursor, head);
         if (!column)
             return false;
@@ -932,16 +1015,15 @@ namespace _EVLK_TERMINAL_
         switch (direct)
         {
         case 0:
-            clearFormat(cursor + 1, num, head);
+            return clear_f(cursor + 1, num, head);
             break;
 
         case 1:
-            clearFormatR(cursor, num, head);
+            return clear_f(cursor, num, head);
             break;
 
         case 2:
-            clearFormat(cursor + 1, num, head);
-            clearFormatR(cursor, num, head);
+            return clear_f(cursor + 1, num, head) && clear_fR(cursor, num, head);
             break;
 
         default:
@@ -952,13 +1034,13 @@ namespace _EVLK_TERMINAL_
     }
     bool Terminal::clearScreen(uint8_t direct)
     {
-        font *head = log;
+        lp head = log.begin();
         uint8_t column = getColumn(cursor, head);
         uint8_t row = getRow(cursor, head);
         if (!column || !row)
             return false;
 
-        font *idx;
+        lp idx;
         /**Direction:
          * 0:RIGHT_DOWN
          * 1:LEFT_UP
@@ -970,8 +1052,8 @@ namespace _EVLK_TERMINAL_
             idx = lineDown(idx);
             while (idx)
             {
-                font *begin = idx + row;
-                clearFormat(begin, -1, idx);
+                lp begin = idx + row;
+                clear_f(begin, -1, idx);
                 idx = lineDown(idx);
             }
             break;
@@ -981,26 +1063,22 @@ namespace _EVLK_TERMINAL_
                 idx = NULL;
             while (idx)
             {
-                font *begin = idx + row - 1;
-                clearFormatR(begin, -1, idx);
+                lp begin = idx + row - 1;
+                clear_fR(begin, -1, idx);
                 idx = lineDown(idx);
                 if (idx > head)
                     idx = NULL;
             }
-            clearFormatR(cursor, -1, head);
+            clear_fR(cursor, -1, head);
             break;
         case 2:
+        {
             idx = focus;
-            idx->c = ' ';
-            // while (idx)
-            // {
-            //     font *begin = idx;
-            //     clearFormat(begin, -1, idx);
-            //     idx = lineDown(idx);
-            // }
-            remove(idx + 1, end);
+            clear(idx, 1);
+            remove(idx + 1, log.end() - (idx + 1));
             cursor = focus;
-            break;
+        }
+        break;
 
         default:
             return false;
@@ -1010,7 +1088,7 @@ namespace _EVLK_TERMINAL_
     }
     bool Terminal::removeDirect(uint8_t direct, uint8_t num)
     {
-        font *head = log;
+        lp head = log.begin();
         uint8_t column = getColumn(cursor, head);
         if (!column)
             return false;
@@ -1022,24 +1100,24 @@ namespace _EVLK_TERMINAL_
         {
         case 0:
         {
-            font *begin = lineDown(head);
-            font *End = begin;
+            lp begin = lineDown(head);
+            lp End = begin;
             if (!begin)
                 return true;
 
             while (num)
             {
-                font *next = lineDown(End);
+                lp next = lineDown(End);
                 End = next;
                 num--;
             }
-            if (End == NULL)
-                End = this->end;
-            remove(begin, End);
+            if (!End)
+                End = log.end();
+            remove(begin, End - begin);
             break;
         }
         case 1:
-            removeFormat(cursor, num, head);
+            remove_f(cursor, num, head);
         default:
             return false;
             break;
@@ -1048,55 +1126,69 @@ namespace _EVLK_TERMINAL_
     }
     bool Terminal::Insert(char c, uint8_t num, bool force)
     {
-        if (num < 1)
-            return true;
-        font f;
-        f.c = c;
-        f.style = pencil;
-        num--;
-        replace(cursor, f);
-        while (num)
-        {
-            insert(cursor, f, force);
-            num--;
-        }
-        return true;
-    }
-    bool Terminal::focusUp(uint8_t num)
-    {
-        focus = lineUp(focus, log, num);
-        return true;
-    }
-    bool Terminal::focusDown(uint8_t num)
-    {
-        while (num)
-        {
-            font *next = lineDown(focus);
-            if (next)
-                focus = next;
-            num--;
-        }
-        return true;
+        return (bool)insert_s(cursor + 1, num, *pencil, c);
     }
 
     bool Terminal::charStyle(_EVLK_TERMINAL_::font &pencil)
     {
         if (!&pencil)
             return false;
-        _EVLK_TERMINAL_::font *p = styleExist(&pencil);
-        if (!p)
-        {
-            p = styleFactory->createFont();
-            if (!p)
-                return false;
-            *p = pencil;
-            if (!styleAdd(p))
-            {
-                delete p;
-                return false;
-            }
-        }
-        this->pencil = p;
+        *this->pencil = pencil;
         return true;
+    }
+
+    bool Terminal::focusUp(uint8_t num)
+    {
+        focus = lineUp(focus, log.begin(), num);
+        return true;
+    }
+    bool Terminal::focusDown(uint8_t num)
+    {
+        while (num)
+        {
+            lp next = lineDown(focus);
+            if (next)
+                focus = next;
+            num--;
+        }
+        return true;
+    }
+    Terminal::lp Terminal::getFocus()
+    {
+        return focus;
+    }
+    Terminal::lp Terminal::getCursor()
+    {
+        if (cursor_Hide)
+            return NULL;
+        return cursor;
+    }
+    Terminal::lp Terminal::getBegin()
+    {
+        return log.begin();
+    }
+    Terminal::lp Terminal::getEnd()
+    {
+        return log.end();
+    }
+    Terminal::lp Terminal::UP(lp h, size_t n)
+    {
+        return lineUp(h, log.begin(), n);
+    }
+    Terminal::lp Terminal::DOWN(lp h, size_t n)
+    {
+        while (n)
+        {
+            h = lineDown(h);
+            n--;
+        }
+        return h;
+    }
+    const font *Terminal::style(lp p)
+    {
+        fp S = style_q(p);
+        if (!S)
+            return NULL;
+        return S->style;
     }
 }
