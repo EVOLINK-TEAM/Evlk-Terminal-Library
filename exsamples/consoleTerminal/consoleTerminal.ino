@@ -1,81 +1,112 @@
 #include "evlk_Terminal.h"
+#include "evlk_Terminal_font565.h"
 #include "def_ANSIctl.h"
 using namespace _EVLK_TERMINAL_;
 
-#include "HardwareSerial.h"
 #include "Arduino.h"
 
-// 向控制台打印字符
-void consoleDrawChar(int16_t row, int16_t column, unsigned char c, uint16_t color, uint16_t bg)
+class ConsoleTerminal_565 : public Terminal,
+                            public Print
 {
-    auto convert565ToANSI = [](uint16_t color565) -> String
+public:
+    void drawChar(int16_t row, int16_t column, unsigned char c, uint16_t color, uint16_t bg)
     {
-        int red = (color565 >> 11) & 0x1F;
-        int green = ((color565 >> 5) & 0x3F);
-        int blue = color565 & 0x1F;
+        auto convert565ToANSI = [](uint16_t color565) -> String
+        {
+            int red = (color565 >> 11) & 0x1F;
+            int green = ((color565 >> 5) & 0x3F);
+            int blue = color565 & 0x1F;
 
-        int red8 = (red * 255) / 31;
-        int green8 = (green * 255) / 63;
-        int blue8 = (blue * 255) / 31;
+            int red8 = (red * 255) / 31;
+            int green8 = (green * 255) / 63;
+            int blue8 = (blue * 255) / 31;
 
+            char num[4];
+            return String(itoa(red8, num, 10)) + ';' + String(itoa(green8, num, 10)) + ';' + String(itoa(blue8, num, 10));
+        };
         char num[4];
-        return String(itoa(red8, num, 10)) + ';' + String(itoa(green8, num, 10)) + ';' + String(itoa(blue8, num, 10));
-    };
-    char num[4];
-    Serial.print(def_ansiec_cur_pos(String(itoa(row, num, 10)), String(itoa(column, num, 10)))); // TODO
-    Serial.print("\033[38;2;" + convert565ToANSI(color) + 'm');
-    Serial.print("\033[48;2;" + convert565ToANSI(bg) + 'm');
-    Serial.print(char(c));
-    Serial.print(def_ansiec_normal);
-}
-// 打印一行字符
-void consoleDisplayTerminal_line(const Terminal::font *lineData, uint8_t width, size_t column)
-{
-    for (uint8_t row = 1; row <= width; row++)
-    {
-        Terminal::font f = *(lineData + row - 1);
-        /* if (f.c == ' ') //* debug
-             f.c = '.';*/
-        if (f.c == '\n')
-            f.c = ' ';
-        if (f.c == '\0')
-            f.c = ' ';
-        consoleDrawChar(row, column, f.c, f.color, f.bgcolor);
+        Serial.print(def_ansiec_cur_pos(String(itoa(row, num, 10)), String(itoa(column, num, 10)))); // TODO
+        Serial.print("\033[38;2;" + convert565ToANSI(color) + 'm');
+        Serial.print("\033[48;2;" + convert565ToANSI(bg) + 'm');
+        Serial.print(char(c));
+        Serial.print(def_ansiec_normal);
     }
-}
-// 打印height行字符
-void consoleDisplayTerminal(Terminal &t, uint8_t height)
-{
-    const Terminal::font *head = NULL;
-    uint8_t width = t.Width();
-    for (uint8_t column = 1; column <= height; column++)
+    void drawLine(const char *p, size_t column)
     {
-        const Terminal::font *idx = t.getWindow(head);
-        if (!idx)
+        if (p < getBegin() || p >= getEnd())
             return;
-        consoleDisplayTerminal_line(idx, width, column);
-    }
-}
 
-int main()
+        const char *h = p;
+        const char *e = DOWN(h) == NULL ? getEnd() - 1 : DOWN(h) - 1;
+        while (p <= e)
+        {
+            char c = *p;
+            const font565 *s = dynamic_cast<const font565 *>(style(p));
+            /* if (c == ' ') //* debug
+                 c = '.';*/
+            if (c == '\n')
+                c = ' ';
+            if (c == '\0')
+                c = ' ';
+            if (p != getCursor())
+                drawChar(p - h + 1, column, c, s->color, s->bgcolor);
+            else
+                drawChar(p - h + 1, column, c, s->bgcolor, s->color);
+            p++;
+        }
+    }
+    void display(uint8_t Height)
+    {
+#define displayOffset 0;
+        static size_t off = 0;
+        const char *b = getFocus();
+        for (size_t col = 1; col <= Height; col++)
+        {
+            drawLine(b, col + off);
+            const char *s = DOWN(b);
+            if (!s)
+                break;
+            b = s;
+        }
+        off += displayOffset;
+    }
+    size_t write(uint8_t c) override
+    {
+        return Terminal::write(c);
+    };
+    size_t write(const uint8_t *buffer, size_t size) override
+    {
+        return Terminal::write(buffer, size);
+    }
+    using Print ::write;
+    ConsoleTerminal_565(uint8_t width, size_t Log_Len, fontFactory &factory, size_t Style_Len)
+        : Terminal(width, Log_Len, factory, Style_Len) {}
+};
+
+fontFactory565 factory;
+ConsoleTerminal_565 terminal(5, 100, factory, 20);
+
+void setup()
 {
     Serial.begin(19200);
     Serial.print(def_ansiec_clean); // 清屏
 
-    const char *str = "abcdefg\nhijklmn\nopqrst\nuvwxzy";
-    Terminal terminal(5, 50, str);
-    consoleDisplayTerminal(terminal, 30);
+    terminal.print("abcdefg\nhijklmn\nopqrst\nuvwxzy");
+    terminal.display(30);
 
     terminal.print(123); // 基本打印
-    terminal.charStyle(T565_RED, T565_BLACK);
+    font565 f;
+    f.color_8(6);   // color = cyan
+    f.bgColor_8(0); // background color = black
+    terminal.charStyle(f);
     terminal.print(456);
-    consoleDisplayTerminal(terminal, 30);
+    terminal.display(30);
     delay(1000);
 
     terminal.focusDown(3); // 页面滚动
     terminal.focusUp(1);
     Serial.print(def_ansiec_clean);
-    consoleDisplayTerminal(terminal, 30);
+    terminal.display(30);
     delay(1000);
 
     // 光标移动
@@ -86,7 +117,7 @@ int main()
     terminal.write('@');
     terminal.cursorPos(3, 5); // 移动到3列5行
     terminal.write('#');
-    consoleDisplayTerminal(terminal, 30);
+    terminal.display(30);
     delay(1000);
 
     // 屏幕控制
@@ -98,9 +129,11 @@ int main()
     terminal.cursorPos(2, 5);
     terminal.removeDirect(0, 2); // 删除光标下边两行字符
     terminal.removeDirect(1, 2); // 删除光标右边两个字符
-    consoleDisplayTerminal(terminal, 30);
+    terminal.display(30);
     delay(1000);
 
     // 打印记录
-    Serial.print(terminal.getLog());
+    Serial.print(terminal.getBegin());
 }
+
+void loop(){};
