@@ -141,7 +141,7 @@ namespace _EVLK_TERMINAL_
     }
     bool Terminal::isIn(lp p, lp h)
     {
-        return isIn(h, p) || p - h < width;
+        return log.isIn(h, p) || (p - h) < width;
     }
     Terminal::lp Terminal::insert(lp p, size_t n, font &s, char f) //!
     {
@@ -232,8 +232,11 @@ namespace _EVLK_TERMINAL_
             return NULL;
 
         size_t dh, dm, de;
-        fp se;
+        fp se = NULL;
         style_diff(p, n, dh, dm, de, se);
+        if (!se)
+            return NULL;
+
         bool headOver = !(se == sh);             // 是否超过头
         size_t headRemain = !headOver ? de : 0;  // 未超过头时的剩余
         bool hasHead = !(p == fh);               // 是否在头的最前
@@ -312,7 +315,7 @@ namespace _EVLK_TERMINAL_
             return NULL;
 
         if (*e != '\n')
-            if (!insert_s(head + fillpos - 1, 1, *s->style, ' '))
+            if (!insert_s(head + fillpos, 1, *s->style, '\n'))
                 return NULL;
         return p;
     }
@@ -485,13 +488,13 @@ namespace _EVLK_TERMINAL_
             if (log.end() + fillLine + fillRow >= log.size()) // 溢出判断
                 return NULL;
 
-            fp r = style_q(head + fillRow);
+            fp r = style_q(head + fillRowPos);
             if (!r)
                 return NULL;
 
             font *fe = (r->style);
 
-            if (!insert(log.end() - 1, fillLine, *fe, '\n'))
+            if (!insert_s(log.end(), fillLine, *fe, '\n'))
                 return NULL;
             while (fillLine)
             {
@@ -499,7 +502,7 @@ namespace _EVLK_TERMINAL_
                 fillLine--;
             }
 
-            if (!insert(head + fillRowPos - 1, fillRow, *fe, ' '))
+            if (!insert_s(head + fillRowPos, fillRow, *fe, ' '))
                 return NULL;
 
             return head + row - 1;
@@ -597,10 +600,14 @@ namespace _EVLK_TERMINAL_
             if (!size)
                 return true;
             const char *Buffer = (const char *)buffer;
-            bool S = false;
-            size_t rs = log.end() - cursor;
+            bool S = true;
 
-            S = insert_s(log.end(), size - rs + 1, *pencil, ' ');
+            size_t rs = size;
+            if (cursor + rs > log.end())
+            {
+                rs = log.end() - cursor;
+                S = insert_s(log.end(), size - rs + 1, *pencil, ' ');
+            }
             if (S)
                 S = replace(cursor, rs, *pencil, ' ');
             if (S)
