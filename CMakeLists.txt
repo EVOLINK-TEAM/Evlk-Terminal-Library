@@ -8,7 +8,7 @@ project(evlk_terminal)
 
 aux_source_directory(${CMAKE_CURRENT_SOURCE_DIR}/src srcs)
 set(include_dirs ${CMAKE_CURRENT_SOURCE_DIR}/src)
-set(requires arduino Adafruit-GFX-Library)
+set(requires arduino)
 
 idf_component_register(SRCS ${srcs}
                        INCLUDE_DIRS ${include_dirs}
