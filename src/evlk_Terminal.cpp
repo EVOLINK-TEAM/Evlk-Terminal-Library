@@ -603,7 +603,7 @@ namespace _EVLK_TERMINAL_
             bool S = true;
 
             size_t rs = size;
-            if (cursor + rs > log.end())
+            if (cursor + rs >= log.end())
             {
                 rs = log.end() - cursor;
                 S = insert_s(log.end(), size - rs + 1, *pencil, ' ');
