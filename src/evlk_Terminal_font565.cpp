@@ -71,6 +71,7 @@ namespace _EVLK_TERMINAL_
     bool font565::sgr0()
     {
         init();
+        return true;
     }
     bool font565::bold()
     {
