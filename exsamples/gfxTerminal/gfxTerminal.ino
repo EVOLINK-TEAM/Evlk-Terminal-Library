@@ -120,6 +120,10 @@ public:
     {
         return Terminal::write(buffer, size);
     }
+    void flush() override
+    {
+        display();
+    }
     using Print ::write;
 };
 
