@@ -38,10 +38,12 @@ namespace _EVLK_TERMINAL_
     }
     font565::font565()
     {
-        init();
+        sinit();
+        BGopacity = false;
+        Blank = false;
     }
 
-    void font565::init()
+    void font565::sinit()
     {
         color = T565_WHITE;
         bgcolor = T565_BLACK;
@@ -52,7 +54,8 @@ namespace _EVLK_TERMINAL_
         Blink = false;
         Rev = false;
         Invis = false;
-    };
+    }
+    void font565::init() { Blank = true; };
     bool font565::color_8(uint8_t c)
     {
         if (c > 8)
@@ -65,12 +68,14 @@ namespace _EVLK_TERMINAL_
         if (c > 8)
             return false;
         bgcolor = colorCode(c);
+        BGopacity = true;
         return true;
     }
 
     bool font565::sgr0()
     {
-        init();
+        sinit();
+        BGopacity = false;
         return true;
     }
     bool font565::bold()
@@ -126,7 +131,10 @@ namespace _EVLK_TERMINAL_
                 Smul == f.Smul &&
                 Blink == f.Blink &&
                 Rev == f.Rev &&
-                Invis == f.Invis);
+                Invis == f.Invis &&
+
+                BGopacity == f.BGopacity &&
+                Blank == f.Blank);
     };
     void font565::operator=(const font &f)
     {
@@ -145,6 +153,9 @@ namespace _EVLK_TERMINAL_
         Blink = f.Blink;
         Rev = f.Rev;
         Invis = f.Invis;
+
+        BGopacity = f.BGopacity;
+        Blank = f.Blank;
         return *this;
     };
 

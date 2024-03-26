@@ -81,7 +81,7 @@ public:
     {
         if (!num)
             return pos;
-        if (Begin > pos || pos + num - 1 > End)
+        if (Begin > pos || pos + num > End)
             return nullptr;
         T *Pos = const_cast<T *>(pos);
         while (num)
