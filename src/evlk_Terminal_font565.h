@@ -30,9 +30,13 @@ namespace _EVLK_TERMINAL_
         bool Rev;
         bool Invis;
 
+        bool BGopacity;
+        bool Blank;
+
         uint16_t colorCode(uint8_t code);
         font565();
 
+        void sinit();
         void init() override;
         bool color_8(uint8_t c) override;
         bool bgColor_8(uint8_t c) override;

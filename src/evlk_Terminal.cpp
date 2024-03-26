@@ -21,6 +21,46 @@ namespace _EVLK_TERMINAL_
         this->style = f.style;
         return *this;
     }
+    Terminal::Terminal(size_t width, size_t height, size_t Log_Len, fontFactory &factory, size_t Style_Len)
+        : log(Log_Len > 1 ? Log_Len : 1, '\0'),
+          styles(Style_Len > 1 ? Style_Len : 1),
+          editor(height > 1 ? height + 1 : 2),
+          width(width > 1 ? width : 1), height(height > 1 ? height : 1),
+          styleFactory(&factory)
+    {
+        focus = cursor = log.begin();
+        style_editor_lp = log.begin();
+        style_editor_fp = styles.begin();
+        blank = styleFactory->createFont();
+        blank->init();
+        _insert(log.begin(), 1, *blank, '\n');
+        pencil = styleFactory->createFont(); // 初始化样式画笔
+        pencil->sgr0();
+        editor.insert(editor.end(), 2);
+        editor.replace(editor.begin(), 1, log.begin());
+        editor.replace(editor.begin() + 1, 1, log.end());
+    };
+    Terminal::~Terminal()
+    {
+        delete pencil;
+        delete blank;
+    }
+    Terminal::fp Terminal::style_resize(fp p, size_t num)
+    {
+        fontI temp(false);
+        temp.style = p->style;
+        temp.size = num;
+        return styles.replace(p, 1, temp);
+    }
+    Terminal::fp Terminal::style_new(fp p, size_t size, font &f)
+    {
+        fontI temp(false);
+        if (&f)
+            temp.style = styleFactory->createFont();
+        *temp.style = f;
+        temp.size = size;
+        return styles.replace(p, 1, temp, true);
+    }
     Terminal::fp Terminal::style(lp p, lp &h, fp &hs)
     {
         if (!log.isIn(h, p) || !styles.isIn(hs))
@@ -46,8 +86,8 @@ namespace _EVLK_TERMINAL_
     {
         if (!log.isIn(style_serch_lp, p))
         {
-            style_serch_lp = log.begin();
-            style_serch_fp = styles.begin();
+            style_serch_lp = p < style_editor_lp ? log.begin() : style_editor_lp;
+            style_serch_fp = p < style_editor_lp ? styles.begin() : style_editor_fp;
         }
         return style(p, style_serch_lp, style_serch_fp);
     }
@@ -66,27 +106,11 @@ namespace _EVLK_TERMINAL_
             style_serch_lp -= style_serch_fp->size;
         }
     }
-    Terminal::fp Terminal::style_resize(fp p, size_t num)
-    {
-        fontI temp(false);
-        temp.style = p->style;
-        temp.size = num;
-        return styles.replace(p, 1, temp);
-    }
-    Terminal::fp Terminal::style_new(fp p, size_t size, font &f)
-    {
-        fontI temp(false);
-        if (&f)
-            temp.style = styleFactory->createFont();
-        *temp.style = f;
-        temp.size = size;
-        return styles.replace(p, 1, temp, true);
-    }
     void Terminal::style_diff(lp b, size_t n, size_t &h, size_t &m, size_t &e, fp &se)
     {
         h = m = e = 0;
         se = NULL;
-        if (!log.isIn(b, b + n))
+        if (!log.isIn(b, b + n - 1))
             return;
 
         lp fh = NULL;
@@ -113,7 +137,6 @@ namespace _EVLK_TERMINAL_
             m += i->size;
         }
     }
-
     bool Terminal::style_check()
     {
         fp fb = styles.begin();
@@ -134,7 +157,6 @@ namespace _EVLK_TERMINAL_
             return 0;
         return 1;
     }
-
     bool Terminal::isIn(lp p)
     {
         return log.isIn(p);
@@ -143,8 +165,15 @@ namespace _EVLK_TERMINAL_
     {
         return log.isIn(h, p) || (p - h) < width;
     }
-    Terminal::lp Terminal::insert(lp p, size_t n, font &s, char f) //!
+    bool Terminal::isIn(size_t head_i)
     {
+        return head_i + 1 < editor.length();
+    }
+    Terminal::lp Terminal::_insert(lp p, size_t n, font &s, char f) //!
+    {
+        if (!n)
+            return p;
+
         bool isEnd = (p == log.end()); // 插入干扰
         lp r = log.insert(p, n, f);
         if (!r)
@@ -169,9 +198,7 @@ namespace _EVLK_TERMINAL_
         };
 
         if (*S->style == s) // 样式相同时
-        {
             style_resize(S, S->size + n);
-        }
         else
         {
             if (isEnd)
@@ -213,19 +240,10 @@ namespace _EVLK_TERMINAL_
         }
         return r;
     }
-    Terminal::lp Terminal::insert_s(lp p, size_t n, font &s, char f)
+    Terminal::lp Terminal::_remove(lp p, size_t n)
     {
-        lp S = insert(p, n, s, f);
-        if (S)
-        {
-            stand = p < stand ? stand - n : stand;
-            cursor = p < cursor ? cursor - n : cursor;
-            focus = p < focus ? focus - n : focus;
-        }
-        return S;
-    }
-    Terminal::lp Terminal::remove(lp p, size_t n)
-    {
+        if (!n)
+            return p;
         lp fh = NULL;
         fp sh = style_q(p, fh);
         if (!sh)
@@ -266,261 +284,414 @@ namespace _EVLK_TERMINAL_
             style_resize(pB, pB->size + pE->size);
             pE++;
         }
-        if (!styles.remove(pB + 1, pE - 1 - pB, true))
+        if (pB != pE && !styles.remove(pB + 1, pE - 1 - pB, true))
             return NULL;
         return r;
     }
-    Terminal::lp Terminal::remove_s(lp p, size_t n)
+    Terminal::lp Terminal::_replace(lp p, size_t n, font &s, char f)
     {
-        lp S = remove(p, n);
-        if (S)
-        {
-            stand = p < stand ? stand - n : stand;
-            cursor = p < cursor ? cursor - n : cursor;
-            focus = p < focus ? focus - n : focus;
-        }
-        return S;
-    }
-    Terminal::lp Terminal::remove_f(lp p, size_t n, lp head)
-    {
-        uint8_t row = getRow(p, head);
-        if (!row)
-            return NULL;
-
-        lp e = lineEnd(head);
-        uint8_t fillpos = width - rowFillNum(head);
-
-        if (e == head && *e == '\n') //'\n'在行首
-            return p;
-
-        n = row + n - 1 > width ? width - row + 1 : n;
-        if (p + n > head + fillpos)
-        {
-            n = head + fillpos - p + 1;
-            if (*e == '\n')
-                n--;
-        }
-
-        if (e == log.end() - 1 && *e != '\n') // 尾行
-            n--;
-
-        fillpos = fillpos - n + 1;
-
-        lp S = remove_s(p, n);
-        if (!S)
-            return NULL;
-
-        fp s = style_q(S);
-        if (!s)
-            return NULL;
-
-        if (*e != '\n')
-            if (!insert_s(head + fillpos, 1, *s->style, '\n'))
-                return NULL;
-        return p;
-    }
-    Terminal::lp Terminal::replace(lp p, size_t n, font &s, char f)
-    {
-        lp r = remove(p, n);
+        lp r = _remove(p, n);
         if (r)
-            r = insert(r, n, s, f);
+            r = _insert(r, n, s, f);
         return r;
     }
-    bool Terminal::clear(lp p, size_t num)
+    Terminal::lp Terminal::_head(lp ep, size_t &index)
     {
-        char f = ' ';
-        return (bool)log.replace(p, num, f, false);
-    }
-    bool Terminal::clear_f(lp p, size_t num, lp head)
-    {
-        if (!isIn(p, head))
-            return false;
-
-        lp e = lineEnd(head);
-        if (num >= e - p + 1)
-        {
-            num = e - p + 1;
-            if (*e == '\n')
-                num--;
-        }
-        return clear(p, num);
-    }
-    bool Terminal::clear_fR(lp p, size_t num, lp head)
-    {
-        if (!isIn(p, head))
-            return false;
-
-        if (num >= p - head + 1)
-        {
-            num = p - head + 1;
-            if (*p == '\n')
-                num--;
-        }
-        return clear(p - num + 1, num);
-    }
-    Terminal::lp Terminal::lineDown(lp head)
-    {
-        if (!isIn(head))
+        index = 0;
+        if (ep < editor[0] || ep >= *(editor.end() - 1))
             return NULL;
-
-        for (lp t = head; t < head + width; t++)
+        size_t len = editor.length() - 1;
+        while (index < len)
         {
-            if (*t == '\n')
-            {
-                if (t + 1 >= log.end())
-                    return NULL;
-                return t + 1;
-            }
-        }
-        if (head + width >= log.end())
-            return NULL;
-        return head + width;
-    }
-    Terminal::lp Terminal::lineUp(lp head, lp stand, size_t num)
-    {
-        if (!isIn(head) || !isIn(stand) || head < stand)
-            return NULL;
-
-        lp first = stand;
-        lp idx = first;
-        while (first < head)
-        {
-            first = lineDown(first);
-            if (num)
-                num--;
-            else
-                idx = lineDown(idx);
-        }
-        return idx;
-    }
-    Terminal::lp Terminal::lineEnd(lp head)
-    {
-        if (!isIn(head))
-            return NULL;
-
-        head = lineDown(head);
-        if (!head)
-            return log.end() - 1;
-        return head - 1;
-    }
-    uint8_t Terminal::getColumn(lp p, lp &head)
-    {
-        if (!isIn(p, head))
-            return 0;
-
-        lp pre = NULL;
-        lp idx = head;
-        uint8_t column = 0;
-
-        while (idx && idx <= p)
-        {
-            pre = idx;
-            idx = lineDown(idx);
-            column++;
-        }
-        head = pre;
-        return column;
-    }
-    uint8_t Terminal::getRow(lp p, lp head)
-    {
-        if (!isIn(p, head))
-            return 0;
-        return p - head + 1;
-    }
-    bool Terminal::getColumn(uint8_t column, size_t &owe, lp &head)
-    {
-        if (column <= 0 || !isIn(head))
-            return false;
-        owe = 0; // 只有在column>最低行的时候才会为正值
-        lp next = head;
-        while (column-- > 1)
-        {
-            next = lineDown(head);
-
-            if (next)
-                head = next;
-            else
-                owe++;
-        }
-        return true;
-    }
-    bool Terminal::getRow(uint8_t row, uint8_t &owe, uint8_t &pos, lp head)
-    {
-        if (row <= 0 || row > width || !isIn(head))
-            return false;
-        pos = head ? width - rowFillNum(head) : 0; // 行填充位置(如果head为NULL的话则为假行，假行为'\n'单字符行)
-        owe = pos < row ? row - pos : 0;           // 行填充数
-
-        return true;
-    }
-    Terminal::lp Terminal::getPos(uint8_t row, uint8_t column, lp stand, bool force)
-    {
-        lp head = stand;
-        size_t fillLine;
-        uint8_t fillRow;
-        uint8_t fillRowPos;
-        if (!getColumn(column, fillLine, head))
-            return NULL;
-
-        if (fillLine)
-        {
-            if (!getRow(row, fillRow, fillRowPos, NULL))
-                return NULL;
-            if (rowFillNum(head)) // head为最后一行，如果最后一行不完整，则会换行
-                fillLine++;
-        }
-        else if (!getRow(row, fillRow, fillRowPos, head))
-            return NULL;
-
-        if (fillRow)
-        {
-            if (fillRowPos == 0) // 如果'\n'是首字符，那么填充时会把'\n'挤出
-                fillRow--;
-            else if (fillRowPos == width - 1) //'\n'在最后不需要处理
-                fillRow--;
-        }
-
-        if (!fillLine && !fillRow)
-            return head + row - 1;
-
-        if (force)
-        {
-            if (log.end() + fillLine + fillRow >= log.size()) // 溢出判断
-                return NULL;
-
-            fp r = style_q(head + fillRowPos);
-            if (!r)
-                return NULL;
-
-            font *fe = (r->style);
-
-            if (!insert_s(log.end(), fillLine, *fe, '\n'))
-                return NULL;
-            while (fillLine)
-            {
-                head = log.end() - 1;
-                fillLine--;
-            }
-
-            if (!insert_s(head + fillRowPos, fillRow, *fe, ' '))
-                return NULL;
-
-            return head + row - 1;
+            if (ep < editor[index + 1])
+                return editor[index];
+            index++;
         }
         return NULL;
     }
-    uint8_t Terminal::rowFillNum(lp head)
+    Terminal::lp Terminal::_end(size_t head_i)
     {
-        lp e = lineEnd(head);
-        if (!e)
-            return 0;
-
-        uint8_t f = width - (e - head + 1);
-        if (*e == '\n')
-            f++;
-        return f;
+        if (!isIn(head_i))
+            return NULL;
+        return editor[head_i + 1] - 1;
     }
-    void Terminal::cmdParser(char c)
+    Terminal::lp Terminal::_end(lp head)
+    {
+        if (!isIn(head))
+            return NULL;
+
+        size_t qi;
+        if (this->_head(head, qi))
+            return _end(qi);
+
+        for (lp t = head; t < head + width; t++)
+            if (*t == '\n')
+                return t;
+        if (head + width > log.end())
+            return NULL;
+        return head + width - 1;
+    }
+    Terminal::lp Terminal::_down(size_t &head_i, size_t &n)
+    {
+        if (!isIn(head_i))
+        {
+            head_i = editor.length();
+            n = 0;
+            return NULL;
+        }
+        size_t l = editor.length() - 1;
+        if (head_i + 1 + n >= l)
+            n = l - head_i - 1;
+        head_i += n;
+        return editor[head_i];
+    }
+    Terminal::lp Terminal::_down(lp head, size_t &n)
+    {
+        if (!isIn(head))
+        {
+            n = 0;
+            return NULL;
+        }
+
+        size_t N = n;
+        size_t qi;
+        lp h = head;
+        if (this->_head(head, qi))
+            h = _down(qi, n);
+        else
+            n = 0;
+        while (n < N)
+        {
+            lp second = _end(h) + 1;
+            if (second == log.end())
+                break;
+            h = second;
+            n++;
+        }
+        return h;
+    }
+    Terminal::lp Terminal::_up(size_t &head_i, size_t &n)
+    {
+        if (!isIn(head_i))
+        {
+            head_i = editor.length();
+            n = 0;
+            return NULL;
+        }
+        if (head_i < n)
+            n = head_i;
+        head_i -= n;
+        return editor[head_i];
+    }
+    Terminal::lp Terminal::_up(lp head, size_t &n)
+    {
+        if (!isIn(head))
+        {
+            n = 0;
+            return NULL;
+        }
+        if (!n)
+            return head;
+
+        auto UP = [&n, this](lp head, lp stand) -> lp
+        {
+            if (head < stand)
+                return NULL;
+
+            lp first, idx;
+            first = idx = stand;
+            while (first < head)
+            {
+                size_t t = 1;
+                first = _down(first, t);
+                if (n)
+                    n--;
+                else
+                    idx = _down(idx, t);
+            }
+            return idx;
+        };
+
+        lp h = UP(head, editor[0]);
+        if (!n)
+            head = h;
+        else
+            head = UP(head, log.begin());
+        return head;
+    }
+    Terminal::lp Terminal::_fillCol(size_t head_i, size_t Col, bool force)
+    {
+        if (!Col || Col > width || !isIn(head_i))
+            return NULL;
+        auto editor_off_r = [this, &head_i](size_t &n)
+        {
+            head_i++;
+            size_t l = editor.length() - 1;
+            while (head_i <= l)
+            {
+                lp p = editor[head_i] + n;
+                editor.replace(editor.begin() + head_i, 1, p);
+                head_i++;
+            }
+        };
+        lp head = editor[head_i];
+        lp end = this->_end(head_i);
+        size_t col = end - head + 1;
+        if (Col > col)
+        {
+            if (!force)
+                return NULL;
+            size_t n = Col - col;
+            if (!_insert(end + 1, n, *blank, ' '))
+                return NULL;
+            char t = ' ';
+            log.replace(end, 1, t);
+            t = '\n';
+            log.replace(end + n, 1, t);
+            editor_off_r(n);
+        }
+        return head + Col - 1;
+    }
+    Terminal::lp Terminal::_fillRow(size_t Row, bool force)
+    {
+        if (!Row || Row > height)
+            return NULL;
+        size_t H = editor.length() - 1;
+        if (Row > H)
+        {
+            if (!force)
+                return NULL;
+            size_t n = Row - H;
+            lp last = _end(H - 1);
+            if (!_insert(last + 1, n, *blank, '\n'))
+                return NULL;
+            editor.insert(editor.end(), n);
+            for (size_t i = 0; i < n; i++)
+                editor.replace(editor.begin() + H + i + 1, 1, (last + i + 2));
+        }
+        return editor[Row - 1];
+    }
+    Terminal::lp Terminal::_delCol(size_t head_i, size_t Col, size_t n)
+    {
+        auto editor_off_l = [this, head_i, Col](size_t n)
+        {
+            size_t i = head_i + 1; // 当行行头不移动
+            size_t l = editor.length() - 1;
+            while (i <= l)
+            {
+                lp p = editor[i] - n;
+                editor.replace(editor.begin() + i, 1, p);
+                i++;
+            }
+        };
+        if (!Col || Col > width || !isIn(head_i))
+            return NULL;
+        lp head = editor[head_i];
+        lp end = this->_end(head_i);
+        size_t N = end - head + 1;
+        if (!n || Col > N)
+            return head + Col - 1;
+        n = Col + n > N + 1 ? N + 1 - Col : n;
+        if (head + Col - 1 + n >= log.end()) // 保留至少一个字符
+            if (!n--)
+                return head + Col - 1;
+        bool broken = !(N == width && *end != '\n');
+        bool whole = Col == 1 && n == N;
+        lp r = _remove(head + Col - 1, n);
+        if (!r)
+            return NULL;
+        if (!broken && !whole)
+        {
+            end -= n;
+            _insert(end + 1, 1, *blank, '\n');
+            n--;
+        }
+
+        lp p = editor[head_i] + Col - 1;
+        if (cursor > p + n)
+            cursor -= n;
+        else if (cursor > p)
+            cursor = p;
+        editor_off_l(n);
+        if (whole)
+            editor.remove(editor.begin() + head_i, 1);
+        return r;
+    }
+    Terminal::lp Terminal::_setPos(size_t row, size_t col, bool force)
+    {
+        lp p = _fillCol(_fillRow(row, force) ? row - 1 : height, col, force);
+        if (p)
+            cursor = p;
+        return p;
+    }
+    Terminal::lp Terminal::_getPos(size_t &row, size_t &col)
+    {
+        lp p = cursor;
+        row = col = 0;
+        lp h = _head(p, row);
+        if (!h)
+            return NULL;
+        row++;
+        col = p - h + 1;
+        return p;
+    }
+    Terminal::lp Terminal::_formPos(size_t row, size_t col)
+    {
+        return _fillCol(_fillRow(row, false) ? row - 1 : height, col, false);
+    }
+    size_t Terminal::write_f(const uint8_t *buffer, size_t size)
+    {
+        auto newLine = [this](size_t &row) -> lp
+        {
+            size_t l = editor.length() - 1;
+            if (row < l)
+                row++;
+            else if (row > height)
+                return NULL;
+            else
+            {
+                if (row == height)
+                {
+                    size_t N = 1;
+                    editorDown(N, true);
+                    if (!N)
+                        return NULL;
+                    row--;
+                }
+                row++;
+                if (!_fillRow(row))
+                    return NULL;
+            }
+            return editor[row - 1];
+        };
+        auto fillLine = [this](size_t row, size_t col, const char *str, size_t n) -> lp
+        {
+            // col + n <= width + 1;
+            size_t N = n;
+            if (col + n - 1 < width)
+                N++;
+            if (!_fillCol(row - 1, col + N - 1))
+                return NULL;
+            lp p = editor[row - 1] + col - 1;
+            for (size_t i = 0; i < n; i++)
+                // log.replace(head + i, 1, *(str + i));
+                _replace(p + i, 1, *pencil, *(str + i));
+            return n ? p + n - 1 : p;
+            // return p;
+        };
+        if (!size)
+            return 0;
+        lp p = cursor;
+        size_t row, col, outsize = 0;
+        if (!_getPos(row, col))
+            return 0;
+        for (const uint8_t *bufferEnd = buffer + size - 1, *i = buffer;
+             buffer <= bufferEnd;
+             i++)
+        {
+            auto fill = [&i, &buffer, row, &col, fillLine, this, &outsize]() -> bool
+            {
+                size_t n = i - buffer + 1;
+                lp r = fillLine(row, col, (char *)buffer, n);
+                if (!r)
+                    return false;
+                // cursor = r + n;
+                cursor = r + 1;
+                col += n;
+                buffer += n;
+                outsize += n;
+                return true;
+            };
+            if (*i == '\n') // 换行符换行
+            {
+                if (i - buffer)
+                {
+                    i--;
+                    if (!fill())
+                        return outsize;
+                    i++;
+                }
+                if (!(newLine(row)))
+                    return outsize;
+                cursor = editor[row - 1];
+                col = 1;
+                buffer++;
+                outsize++;
+            }
+            else if (col + (i - buffer + 1) > width) // 一般换行
+            {
+                if (!(fill() && newLine(row)))
+                    return outsize;
+
+                cursor = editor[row - 1];
+                col = 1;
+            }
+            else if (i >= bufferEnd)
+                if (!fill())
+                    return outsize;
+        }
+        focus = editor[0]; // 重定向
+        return outsize;
+    }
+    Terminal::lp Terminal::editorDown(size_t &n, bool force)
+    {
+        for (size_t i = 0; i < n; i++)
+        {
+            size_t N = 1;
+            lp down = this->_down(editor[editor.length() - 1], N);
+            if (N || (force && editor.length() >= 2))
+            {
+                for (size_t i = 0; i < editor.length() - 1; i++)
+                    editor.replace(editor.begin() + i, 1, *(editor.begin() + i + 1));
+                editor.replace(editor.end() - 1, 1, down);
+                if (!N && force)
+                    editor.remove(editor.end() - 1, 1);
+            }
+            else
+            {
+                n = i;
+                break;
+            }
+        }
+        lp e_lp;
+        fp e_fp = style_q(editor[0], e_lp);
+        if (!e_fp)
+            return NULL;
+        style_editor_fp = e_fp;
+        style_editor_lp = e_lp;
+
+        return editor[0];
+    }
+    Terminal::lp Terminal::editorUp(size_t &n, bool force)
+    {
+        for (size_t i = 0; i < n; i++)
+        {
+            size_t N = 1;
+            lp up = this->_up(editor[0], N);
+            if (N || (force && editor.length() >= 2))
+            {
+                for (size_t i = 0; i < editor.length() - 1; i++)
+                    editor.replace(editor.begin() + i + 1, 1, *(editor.begin() + i));
+                editor.replace(editor.begin(), 1, up);
+                if (!N && force)
+                    editor.remove(editor.begin(), 1);
+            }
+            else
+            {
+                n = i;
+                break;
+            }
+        }
+        lp e_lp;
+        fp e_fp = style_q(editor[0], e_lp);
+        if (!e_fp)
+            return NULL;
+        style_editor_fp = e_fp;
+        style_editor_lp = e_lp;
+
+        return editor[0];
+    }
+    void Terminal::VT100(char c)
     {
         auto cancel = [this]()
         {
@@ -550,7 +721,7 @@ namespace _EVLK_TERMINAL_
 
         if (c == '[')
         {
-            if (cmdlock != 1 || len != 1)
+            if (cmdlock != 1 || len != 2)
                 cancel();
             else
                 cmdlock = 2;
@@ -559,7 +730,7 @@ namespace _EVLK_TERMINAL_
 
         if (c == '?')
         {
-            if (cmdlock != 2 || len != 2)
+            if (cmdlock != 2 || len != 3)
                 cancel();
             return;
         }
@@ -571,10 +742,7 @@ namespace _EVLK_TERMINAL_
             if (c == ch)
             {
                 cmdlock = 0;
-                char Temp[len + 2];
-                Temp[0] = '\033';
-                strcpy(Temp + 1, cmdtemp);
-                if (cmdParser(Temp))
+                if (VT100(cmdtemp, len))
                     strcpy(cmdtemp, "");
                 else
                     cancel();
@@ -589,36 +757,8 @@ namespace _EVLK_TERMINAL_
         }
     }
 
-    size_t Terminal::write(uint8_t c)
-    {
-        return write(&c, 1);
-    }
     size_t Terminal::write(const uint8_t *buffer, size_t size)
     {
-        auto Write = [this](const uint8_t *buffer, size_t size) -> size_t
-        {
-            if (!size)
-                return true;
-            const char *Buffer = (const char *)buffer;
-            bool S = true;
-
-            size_t rs = size;
-            if (cursor + rs >= log.end())
-            {
-                rs = log.end() - cursor;
-                S = insert_s(log.end(), size - rs + 1, *pencil, ' ');
-            }
-            if (S)
-                S = replace(cursor, rs, *pencil, ' ');
-            if (S)
-            {
-                for (size_t i = 0; i < size; i++)
-                    log.replace(cursor + i, 1, *(Buffer + i));
-                cursor += size;
-            }
-            return S ? size : 0;
-        };
-
         const uint8_t *b = buffer;
         size_t n = 0;
         size_t N = 0;
@@ -627,37 +767,27 @@ namespace _EVLK_TERMINAL_
             char c = *(buffer + i);
             if (cmdlock)
             {
-                cmdParser(c);
+                VT100(c);
                 b++;
                 continue;
             }
             if (c == '\033')
             {
-                N += Write(b, n);
+                N += write_f(b, n);
                 b += n + 1;
                 n = 0;
+                strcpy(cmdtemp, "\033");
                 cmdlock = 1;
                 continue;
             }
             n++;
         }
-        N += Write(b, n);
+        N += write_f(b, n);
         return N;
     }
-    Terminal::Terminal(uint8_t width, size_t Log_Len, fontFactory &factory, size_t Style_Len)
-        : log(Log_Len > 1 ? Log_Len : 1, '\0'),
-          styles(Style_Len > 1 ? Style_Len : 1),
-          width(width),
-          styleFactory(&factory)
+    size_t Terminal::write(uint8_t c)
     {
-        stand = focus = cursor = log.begin();
-        pencil = styleFactory->createFont(); // 初始化样式画笔
-        pencil->init();
-        insert(log.begin(), 1, *pencil, ' ');
-    };
-    Terminal::~Terminal()
-    {
-        delete pencil;
+        return write(&c, 1);
     }
     uint8_t Terminal::Width()
     {
@@ -667,27 +797,22 @@ namespace _EVLK_TERMINAL_
     {
         return log.length();
     }
-    size_t Terminal::Height(lp stand)
+    size_t Terminal::Height()
     {
         size_t h = 1;
-        stand = stand == NULL ? log.begin() : stand;
+        lp stand = log.begin();
         while (stand)
         {
-            stand = DOWN(stand);
+            stand = down(stand);
             h++;
         }
         return h;
     }
-    bool Terminal::resize(uint8_t width)
-    {
-        this->width = width;
-        return true;
-    }
-    bool Terminal::cmdParser(lp str)
+    bool Terminal::VT100(const char *str) { return VT100(str, strlen(str)); }
+    bool Terminal::VT100(const char *str, size_t len)
     {
         if (str[0] != '\033' || str[1] != '[')
             return false;
-        uint8_t len = strlen(str);
         if (len < 3)
             return false;
 
@@ -700,7 +825,7 @@ namespace _EVLK_TERMINAL_
             len--;
         }
 
-        int data[4] = {0};
+        int data[8] = {0};
         auto parser = [&data](const char *cmd, uint8_t width) -> uint8_t
         {
             uint8_t i = 0;
@@ -724,10 +849,10 @@ namespace _EVLK_TERMINAL_
                 switch (end)
                 {
                 case 'l':
-                    return cursorHide(true);
+                    return hide(true);
                     break;
                 case 'h':
-                    return cursorHide(false);
+                    return hide(false);
                     break;
                 default:
                     return false;
@@ -738,105 +863,87 @@ namespace _EVLK_TERMINAL_
                 return false;
         }
 
+#define VT100_param_limit(n) \
+    if (num != n)            \
+        return false;
+
         switch (end)
         {
         case 'H':
-            if (num != 2)
-                return false;
-            return cursorPos(data[1], data[0], true);
+            VT100_param_limit(2);
+            return cup(data[1], data[0], true);
         case 'A':
-            if (num != 1)
-                return false;
-            return cursorDirect(0, data[0], true);
+            VT100_param_limit(1);
+            return move(0, data[0], true);
         case 'B':
-            if (num != 1)
-                return false;
-            return cursorDirect(1, data[0], true);
+            VT100_param_limit(1);
+            return move(1, data[0], true);
         case 'C':
-            if (num != 1)
-                return false;
-            return cursorDirect(2, data[0], true);
+            VT100_param_limit(1);
+            return move(2, data[0], true);
         case 'D':
-            if (num != 1)
-                return false;
-            return cursorDirect(3, data[0], true);
+            VT100_param_limit(1);
+            return move(3, data[0], true);
         case 'E':
-            if (num != 1)
-                return false;
-            return cursorDirectHead(0, data[0], true);
+            VT100_param_limit(1);
+            return move(4, data[0], true);
         case 'F':
-            if (num != 1)
-                return false;
-            return cursorDirectHead(1, data[0], true);
+            VT100_param_limit(1);
+            return move(5, data[0], true);
         case 'G':
-            if (num != 1)
-                return false;
-            return cursorRow(data[0], true);
+            VT100_param_limit(1);
+            return move(6, data[0], true);
         case 'n': // TODO
-            if (num != 1 || data[0] != 6)
-                return false;
             break;
-        case 's':
-            if (num != 1 || data[0] != 0)
-                return false;
-            return cursorSave();
-        case 'u':
-            if (num != 1 || data[0] != 0)
-                return false;
-            return cursorUse();
+        case 's': // TODO
+            break;
+        case 'u': // TODO
+            break;
         case 'X':
-            if (num != 1)
-                return false;
-            return clearDirect(0, data[0]);
+            VT100_param_limit(1);
+            return clear(0, data[0]);
         case 'K':
-            if (num != 1)
-                return false;
+            VT100_param_limit(1);
             switch (data[0])
             {
             case 0:
-                return clearDirect(0, -1);
+                return clear(1);
             case 1:
-                return clearDirect(1, -1);
+                return clear(2);
             case 2:
-                return clearDirect(2, -1);
+                return clear(3);
             default:
                 return false;
             }
-            return cursorDirectHead(1, data[0]);
         case 'J':
-            if (num != 1)
-                return false;
+            VT100_param_limit(1);
             switch (data[0])
             {
             case 0:
-                return clearScreen(0);
+                return clear(4);
             case 1:
-                return clearScreen(1);
+                return clear(5);
             case 2:
-                return clearScreen(2);
+                return clear(6);
             default:
                 return false;
             }
         case 'M':
-            if (num != 1)
-                return false;
-            return removeDirect(0, data[0]);
+            VT100_param_limit(1);
+            return remove(0, data[0]);
         case 'P':
-            if (num != 1)
-                return false;
-            return removeDirect(1, data[0]);
+            VT100_param_limit(1);
+            return remove(1, data[0]);
         case '@': // TODO
             break;
         case 'L': // TODO
             break;
         case 'S':
-            if (num != 1)
-                return false;
-            return focusUp(data[0]);
+            VT100_param_limit(1);
+            return Focus(0, data[0]);
         case 'T':
-            if (num != 1)
-                return false;
-            return focusDown(data[0]);
+            VT100_param_limit(1);
+            return Focus(1, data[0]);
         case 'm':
             if (num < 1)
                 return false;
@@ -885,7 +992,7 @@ namespace _EVLK_TERMINAL_
                     if (40 <= data[0] && data[0] <= 47)
                         f->bgColor_8(data[0] - 40);
                 }
-                bool c = charStyle(*f);
+                bool c = Pencil(*f);
                 delete f;
                 return c;
             }
@@ -895,22 +1002,12 @@ namespace _EVLK_TERMINAL_
         return false;
     }
 
-    bool Terminal::cursorPos(uint8_t row, uint8_t column, bool force) //!
+    bool Terminal::Pos(size_t &row, size_t &col) { return _getPos(row, col); }
+    bool Terminal::cup(size_t row, size_t column, bool force) { return _setPos(row, column, force); }
+    bool Terminal::move(uint8_t direct, uint8_t num, bool force)
     {
-        lp t = getPos(row, column, log.begin(), force);
-        if (!t)
-            return false;
-        cursor = t;
-        //! if (end <= cursor)
-        //     end = cursor + 1;
-        return true;
-    }
-    bool Terminal::cursorDirect(uint8_t direct, uint8_t num, bool force)
-    {
-        lp head = stand;
-        uint8_t column = getColumn(cursor, head);
-        uint8_t row = getRow(cursor, head);
-        if (!column || !row)
+        size_t row, col;
+        if (!Pos(row, col))
             return false;
 
         /**Direction:
@@ -918,187 +1015,126 @@ namespace _EVLK_TERMINAL_
          * 1:DOWN
          * 2:RIGHT
          * 3:LEFT
+         * 4:DOWN_HEAD
+         * 5:UP_HAED
+         * 6:COL
          */
         switch (direct)
         {
         case 0:
-            column = column - num > 1 ? column - num : 1;
+            row = row > num + 1 ? row - num : 1;
             break;
         case 1:
-            column = column + num;
+            row = row + num > height ? height : row + num;
             break;
         case 2:
-            row = row + num < width ? row + num : width;
+            col = col + num > width ? width : col + num;
             break;
         case 3: // force not work
-            row = row - num > 1 ? row - num : 1;
+            col = col > num + 1 ? col - num : 1;
             break;
+        case 4:
+            row = row + num > height ? height : row + num;
+            col = 1;
+            break;
+        case 5:
+            row = row > num + 1 ? row - num : 1;
+            col = 1;
+        case 6:
+            col = num && num <= width ? num : col;
         default:
             return false;
             break;
         }
-
-        return cursorPos(row, column, force);
+        return cup(row, col, force);
     }
-    bool Terminal::cursorDirectHead(uint8_t direct, uint8_t num, bool force)
-    {
-        lp head = stand;
-        uint8_t column = getColumn(cursor, head);
-        if (!column)
-            return false;
-
-        /**Direction:
-         * 0:DOWN
-         * 1:UP
-         */
-        switch (direct)
-        {
-        case 0:
-            column += num;
-            break;
-        case 1: // force not work
-            column = column - num > 1 ? column - num : 1;
-            break;
-        default:
-            return false;
-            break;
-        }
-
-        return cursorPos(1, column, force);
-    }
-    bool Terminal::cursorRow(uint8_t row, bool force)
-    {
-        lp head = stand;
-        uint8_t column = getColumn(cursor, head);
-        return cursorPos(row, column, force);
-    }
-    bool Terminal::cursorGet(uint8_t &row, uint8_t &column)
-    {
-        lp head = stand;
-        column = getColumn(cursor, head);
-        row = getRow(cursor, head);
-        if (!column || !row)
-            return false;
-        return true;
-    }
-    bool Terminal::cursorSave()
-    {
-        lp head = log.begin();
-        uint8_t column = getColumn(cursor, head);
-        uint8_t row = getRow(cursor, head);
-        if (!column || !row)
-            return false;
-
-        cursor_Save_Column = column;
-        cursor_Save_Column = row;
-        return true;
-    }
-    bool Terminal::cursorUse()
-    {
-        lp head = log.begin();
-        lp pos = getPos(cursor_Save_Row, cursor_Save_Column, head, true);
-        if (!pos)
-            return false;
-        cursor = pos;
-        return true;
-    }
-    bool Terminal::cursorHide(bool enable)
+    bool Terminal::hide(bool enable)
     {
         cursor_Hide = enable;
         return true;
     }
-
-    bool Terminal::clearDirect(uint8_t direct, uint8_t num)
+    bool Terminal::clear(uint8_t direct, uint8_t num)
     {
-        lp head = log.begin();
-        uint8_t column = getColumn(cursor, head);
-        if (!column)
+        size_t row, col, head_i;
+        if (!Pos(row, col))
             return false;
 
-        /**Direction:
+        lp head = _head(cursor, head_i);
+        size_t l = editor.length() - 1;
+
+        auto Clear = [this, &head_i](size_t col, size_t num) -> bool
+        {
+            lp end = _end(head_i);
+            if (*end == '\n')
+                end--;
+            size_t End = end + 1 - editor[head_i];
+            if (col > End)
+                return true;
+            num = col + num > End + 1 ? End - col + 1 : num;
+            // if (col + num > End + 1)
+            //     return _delCol(head_i, col, num);
+            return _replace(editor[head_i] + col - 1, num, *blank, ' ');
+        };
+
+        /**Direction:0:向右 - 1:向右 - 2:向左 - 3:整行 - 4:右下 - 5:左上 - 6:整屏(光标移至左上角)
          * 0:RIGHT
-         * 1:LEFT
-         * 2:LINE*/
+         * 1:RIGHT
+         * 2:LEFT
+         * 3:LINE
+         * 4:RIGHT_DOWN
+         * 5:LEFT_UP
+         * 6:ALL*/
         switch (direct)
         {
         case 0:
-            return clear_f(cursor + 1, num, head);
-            break;
+            return Clear(col, num);
 
         case 1:
-            return clear_f(cursor, num, head);
-            break;
+            return Clear(col, width);
 
         case 2:
-            return clear_f(cursor + 1, num, head) && clear_fR(cursor, num, head);
-            break;
+            return Clear(1, col);
 
+        case 3:
+            return Clear(1, width);
+
+        case 4:
+            while (head_i < l)
+            {
+                Clear(col, width);
+                head_i++;
+            }
+            break;
+        case 5:
+            while (head_i > 0)
+            {
+                Clear(1, col);
+                head_i--;
+            }
+            Clear(1, col);
+            break;
+        case 6:
+            head_i = 0;
+            while (head_i < l)
+            {
+                Clear(1, width);
+                head_i++;
+            }
+            cursor = editor[0];
+            break;
         default:
             return false;
-            break;
         }
         return true;
     }
-    bool Terminal::clearScreen(uint8_t direct)
+    bool Terminal::remove(uint8_t direct, uint8_t num)
     {
-        lp head = log.begin();
-        uint8_t column = getColumn(cursor, head);
-        uint8_t row = getRow(cursor, head);
-        if (!column || !row)
+        size_t row, col, head_i;
+        if (!Pos(row, col))
             return false;
 
-        lp idx;
-        /**Direction:
-         * 0:RIGHT_DOWN
-         * 1:LEFT_UP
-         * 2:SCREEN*/
-        switch (direct)
-        {
-        case 0:
-            idx = head;
-            idx = lineDown(idx);
-            while (idx)
-            {
-                lp begin = idx + row;
-                clear_f(begin, -1, idx);
-                idx = lineDown(idx);
-            }
-            break;
-        case 1:
-            idx = focus;
-            if (idx > head)
-                idx = NULL;
-            while (idx)
-            {
-                lp begin = idx + row - 1;
-                clear_fR(begin, -1, idx);
-                idx = lineDown(idx);
-                if (idx > head)
-                    idx = NULL;
-            }
-            clear_fR(cursor, -1, head);
-            break;
-        case 2:
-        {
-            idx = focus;
-            clear(idx, 1);
-            remove(idx + 1, log.end() - (idx + 1));
-            cursor = focus;
-        }
-        break;
-
-        default:
-            return false;
-            break;
-        }
-        return true;
-    }
-    bool Terminal::removeDirect(uint8_t direct, uint8_t num)
-    {
-        lp head = log.begin();
-        uint8_t column = getColumn(cursor, head);
-        if (!column)
-            return false;
+        lp head = _head(cursor, head_i);
+        size_t l = editor.length() - 1;
 
         /**Direction:
          * 0:DOWN
@@ -1107,90 +1143,47 @@ namespace _EVLK_TERMINAL_
         {
         case 0:
         {
-            lp begin = lineDown(head);
-            lp End = begin;
-            if (!begin)
-                return true;
-
-            while (num)
+            size_t i = head_i;
+            while (num && i < l)
             {
-                lp next = lineDown(End);
-                End = next;
+                _delCol(head_i, 1, width);
                 num--;
+                i++;
             }
-            if (!End)
-                End = log.end();
-            remove(begin, End - begin);
             break;
         }
         case 1:
-            remove_f(cursor, num, head);
+            _delCol(head_i, col, num);
+            break;
         default:
             return false;
-            break;
         }
         return true;
     }
-    bool Terminal::Insert(char c, uint8_t num, bool force)
-    {
-        return (bool)insert_s(cursor + 1, num, *pencil, c);
-    }
-
-    bool Terminal::charStyle(_EVLK_TERMINAL_::font &pencil)
+    bool Terminal::Pencil(_EVLK_TERMINAL_::font &pencil)
     {
         if (!&pencil)
             return false;
         *this->pencil = pencil;
         return true;
     }
-
-    bool Terminal::focusUp(uint8_t num)
+    _EVLK_TERMINAL_::font &Terminal::Pencil() { return *pencil; }
+    bool Terminal::Focus(bool direct, size_t num) { return direct ? (focus = _down(focus, num)) : (focus = _up(focus, num)); }
+    Terminal::lp Terminal::Focus() { return focus; }
+    Terminal::lp Terminal::Cursor() { return cursor; }
+    Terminal::lp Terminal::Begin() { return log.begin(); }
+    Terminal::lp Terminal::End() { return log.end(); }
+    Terminal::lp Terminal::up(lp h, size_t n)
     {
-        focus = lineUp(focus, log.begin(), num);
-        return true;
+        lp d = _up(h, n);
+        return !n ? NULL : d;
     }
-    bool Terminal::focusDown(uint8_t num)
+    Terminal::lp Terminal::down(lp h, size_t n)
     {
-        while (num)
-        {
-            lp next = lineDown(focus);
-            if (next)
-                focus = next;
-            num--;
-        }
-        return true;
+        lp d = _down(h, n);
+        return !n ? NULL : d;
     }
-    Terminal::lp Terminal::getFocus()
-    {
-        return focus;
-    }
-    Terminal::lp Terminal::getCursor()
-    {
-        if (cursor_Hide)
-            return NULL;
-        return cursor;
-    }
-    Terminal::lp Terminal::getBegin()
-    {
-        return log.begin();
-    }
-    Terminal::lp Terminal::getEnd()
-    {
-        return log.end();
-    }
-    Terminal::lp Terminal::UP(lp h, size_t n)
-    {
-        return lineUp(h, log.begin(), n);
-    }
-    Terminal::lp Terminal::DOWN(lp h, size_t n)
-    {
-        while (n)
-        {
-            h = lineDown(h);
-            n--;
-        }
-        return h;
-    }
+    Terminal::lp Terminal::end(lp h) { return _end(h); }
     const font *Terminal::style(lp p)
     {
         fp S = style_q(p);
@@ -1198,4 +1191,5 @@ namespace _EVLK_TERMINAL_
             return NULL;
         return S->style;
     }
+
 }
