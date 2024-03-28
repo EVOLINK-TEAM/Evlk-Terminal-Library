@@ -163,7 +163,7 @@ namespace _EVLK_TERMINAL_
          * @param column 列
          * @param force 当需要填充空字符时是否填充
          */
-        bool cup(size_t row, size_t column, bool force = false);
+        bool cup(size_t row, size_t column, bool force = true);
 
         /**
          * @brief 光标移动
@@ -171,7 +171,7 @@ namespace _EVLK_TERMINAL_
          * @param num 移动数
          * @param force 当需要填充空字符时是否填充,在direct为3,5时无效
          */
-        bool move(uint8_t direct, uint8_t num, bool force = false);
+        bool move(uint8_t direct, uint8_t num, bool force = true);
 
         /**
          * @brief 光标隐藏
