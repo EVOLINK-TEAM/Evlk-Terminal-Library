@@ -13,16 +13,10 @@
 #include "simpleCntr.h"
 #include "evlk_Terminal_fontImpl.h"
 
-class test;
-
 namespace _EVLK_TERMINAL_
 {
     class Terminal //: public Print
     {
-        friend class ::test;
-
-    public:
-        void t(){};
 
     private:
         struct fontI // 样式与索引，应包含一个font实例
@@ -131,7 +125,7 @@ namespace _EVLK_TERMINAL_
          * @param LogLen 存储的最大字符数
          * @param Log 初始化字符数组，当字符串长度大于LogLen时，以LogLen大小以Log长度为准
          */
-        Terminal(size_t width, size_t height, size_t Log_Len, fontFactory &factory, size_t Style_Len);
+        Terminal(fontFactory &factory, size_t width, size_t height, size_t Log_Len, size_t Style_Len);
         ~Terminal();
 
         /**
@@ -148,6 +142,8 @@ namespace _EVLK_TERMINAL_
          * @brief 返回存储的字符数组的长度
          */
         size_t Length();
+
+        bool resize(size_t width, size_t height);
 
         /**
          * @brief ANSI转义控制符解析

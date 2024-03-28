@@ -21,7 +21,7 @@ namespace _EVLK_TERMINAL_
         this->style = f.style;
         return *this;
     }
-    Terminal::Terminal(size_t width, size_t height, size_t Log_Len, fontFactory &factory, size_t Style_Len)
+    Terminal::Terminal(fontFactory &factory, size_t width, size_t height, size_t Log_Len, size_t Style_Len)
         : log(Log_Len > 1 ? Log_Len : 1, '\0'),
           styles(Style_Len > 1 ? Style_Len : 1),
           editor(height > 1 ? height + 1 : 2),
@@ -181,7 +181,7 @@ namespace _EVLK_TERMINAL_
 
         if (styles.empty()) // 初始化样式表
         {
-            fp b = styles.insert(styles.end(), 1); // 构造函数预留了至少一个
+            fp b = styles.insert(styles.end(), 1, fontI()); // 构造函数预留了至少一个
             style_new(b, n, s);
             return r;
         }
@@ -203,7 +203,7 @@ namespace _EVLK_TERMINAL_
         {
             if (isEnd)
             {
-                fp temp = styles.insert(styles.end(), 1);
+                fp temp = styles.insert(styles.end(), 1, fontI());
                 if (!temp)
                     return style_insertError();
                 style_new(temp, n, s);
@@ -219,7 +219,7 @@ namespace _EVLK_TERMINAL_
                     }
                     else
                     {
-                        fp temp = styles.insert(S, 1);
+                        fp temp = styles.insert(S, 1, fontI());
                         if (!temp)
                             return style_insertError();
                         style_new(temp, n, s);
@@ -227,7 +227,7 @@ namespace _EVLK_TERMINAL_
                 }
                 else // 中
                 {
-                    fp temp = styles.insert(S + 1, 2);
+                    fp temp = styles.insert(S + 1, 2, fontI());
                     if (!temp)
                         return style_insertError();
                     size_t S_size = S->size;
@@ -807,6 +807,36 @@ namespace _EVLK_TERMINAL_
             h++;
         }
         return h;
+    }
+    bool Terminal::resize(size_t w, size_t h)
+    {
+        width = w ? w : 1;
+        height = h ? h : 1;
+        lp head = editor[0];
+        editor.remove(editor.begin(), editor.length());
+        editor.resize(height + 1);
+        size_t T = 1;
+        for (lp s = log.begin(); T; s = _down(s, T))
+            if (s >= head)
+            {
+                head = s;
+                break;
+            }
+        focus = head;
+        for (size_t i = 0; i <= height; i++)
+        {
+            editor.insert(editor.end(), 1, head);
+            size_t T = 1;
+            head = _down(head, T);
+            if (!T)
+            {
+                editor.insert(editor.end(), 1, log.end());
+                break;
+            }
+        }
+        if (cursor >= *(editor.end() - 1))
+            cursor = head;
+        return true;
     }
     bool Terminal::VT100(const char *str) { return VT100(str, strlen(str)); }
     bool Terminal::VT100(const char *str, size_t len)
