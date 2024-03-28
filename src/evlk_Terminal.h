@@ -121,9 +121,9 @@ namespace _EVLK_TERMINAL_
 
         /**
          * @param width 指定窗口宽度
-         * @param height 指定窗口宽度
-         * @param LogLen 存储的最大字符数
-         * @param Log 初始化字符数组，当字符串长度大于LogLen时，以LogLen大小以Log长度为准
+         * @param height 指定窗口高度
+         * @param Log_Len 存储的最大字符数
+         * @param Style_Len 存储的最大样式变换次数
          */
         Terminal(fontFactory &factory, size_t width, size_t height, size_t Log_Len, size_t Style_Len);
         ~Terminal();
@@ -159,8 +159,8 @@ namespace _EVLK_TERMINAL_
 
         /**
          * @brief 设置光标位置
-         * @param row 列
-         * @param column 行
+         * @param row 行
+         * @param column 列
          * @param force 当需要填充空字符时是否填充
          */
         bool cup(size_t row, size_t column, bool force = false);
@@ -214,7 +214,7 @@ namespace _EVLK_TERMINAL_
          * @brief 焦点滚动
          * @param direct 0:上滚 - 1:下滚
          * @param num 滚动的行数
-         * @attention 单行时间复杂度较高，不宜频繁使用
+         * @attention 向上滚动时单行时间复杂度较高，不宜频繁使用
          */
         bool Focus(bool direct, size_t num = 1);
         /**
@@ -223,7 +223,7 @@ namespace _EVLK_TERMINAL_
         lp Focus();
         /**
          * @brief 获取光标指针
-         * @note 如果为NULL，则隐藏了光标，可以使用```cursorHide(false);```恢复
+         * @note 如果为NULL，则隐藏了光标，可以使用```hide(false);```恢复
          */
         lp Cursor();
         /**
