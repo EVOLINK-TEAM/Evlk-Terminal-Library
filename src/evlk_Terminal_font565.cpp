@@ -116,7 +116,7 @@ namespace _EVLK_TERMINAL_
 
     bool font565::operator==(const font &f) const
     {
-        const font565 *F = dynamic_cast<const font565 *>(&f);
+        const font565 *F = static_cast<const font565 *>(&f);
         if (F && *this == *F)
             return true;
         return false;
@@ -138,7 +138,7 @@ namespace _EVLK_TERMINAL_
     };
     void font565::operator=(const font &f)
     {
-        const font565 *F = dynamic_cast<const font565 *>(&f);
+        const font565 *F = static_cast<const font565 *>(&f);
         if (F)
             *this = *F;
     }
