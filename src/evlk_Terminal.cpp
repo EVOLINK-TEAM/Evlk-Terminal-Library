@@ -735,24 +735,15 @@ namespace _EVLK_TERMINAL_
             return;
         }
 
-        char end[] = {'m', 'A', 'B', 'C', 'D', 'E', 'G', 'n', 's', 'u', 'l', 'h', 'X', 'K', 'J', 'M', 'P', '@', 'L', 'S', 'T'};
-
-        for (char ch : end)
-        {
-            if (c == ch)
-            {
-                cmdlock = 0;
-                if (VT100(cmdtemp, len))
-                    strcpy(cmdtemp, "");
-                else
-                    cancel();
-                return;
-            }
-        }
-
-        if (!(isdigit(c) || c == ';') || cmdlock != 2)
-        {
+        if (cmdlock != 2)
             cancel();
+        if (!isdigit(c) && c != ';')
+        {
+            cmdlock = 0;
+            if (VT100(cmdtemp, len))
+                strcpy(cmdtemp, "");
+            else
+                cancel();
             return;
         }
     }
@@ -849,7 +840,8 @@ namespace _EVLK_TERMINAL_
         const char *begin = str + 2;
         char end = *(str + len - 1);
         len = len - 3;
-        if (*(begin + 1) == '?')
+        bool ishide = *begin == '?';
+        if (ishide)
         {
             begin++;
             len--;
@@ -867,12 +859,12 @@ namespace _EVLK_TERMINAL_
                 data[i] = atoi(ret);
                 i++;
             }
-            return i;
             delete str;
+            return i;
         };
         uint8_t num = parser(begin, len);
 
-        if (*(begin + 1) == '?')
+        if (ishide)
         {
             if (num == 1 && data[0] == 25)
             {
@@ -900,8 +892,14 @@ namespace _EVLK_TERMINAL_
         switch (end)
         {
         case 'H':
-            VT100_param_limit(2);
-            return cup(data[1], data[0], true);
+            if (!num)
+                return cup(1, 1);
+            else if (num == 1)
+                return cup(data[0], 1, true);
+            else if (num == 2)
+                return cup(data[0], data[1], true);
+            else
+                return false;
         case 'A':
             VT100_param_limit(1);
             return move(0, data[0], true);
@@ -1070,8 +1068,10 @@ namespace _EVLK_TERMINAL_
         case 5:
             row = row > num + 1 ? row - num : 1;
             col = 1;
+            break;
         case 6:
             col = num && num <= width ? num : col;
+            break;
         default:
             return false;
             break;
@@ -1200,7 +1200,7 @@ namespace _EVLK_TERMINAL_
     _EVLK_TERMINAL_::font &Terminal::Pencil() { return *pencil; }
     bool Terminal::Focus(bool direct, size_t num) { return direct ? (focus = _down(focus, num)) : (focus = _up(focus, num)); }
     Terminal::lp Terminal::Focus() { return focus; }
-    Terminal::lp Terminal::Cursor() { return cursor; }
+    Terminal::lp Terminal::Cursor() { return cursor_Hide ? NULL : cursor; }
     Terminal::lp Terminal::Begin() { return log.begin(); }
     Terminal::lp Terminal::End() { return log.end(); }
     Terminal::lp Terminal::up(lp h, size_t n)
